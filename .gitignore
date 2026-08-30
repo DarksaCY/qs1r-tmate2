@@ -6,6 +6,8 @@ venv/
 build/
 dist/
 
+.claude/settings.local.json
+
 # local reverse-engineering scratch output
 scratch/
 *.strings.txt
