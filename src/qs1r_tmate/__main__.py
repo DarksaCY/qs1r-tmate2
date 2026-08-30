@@ -7,7 +7,7 @@ import logging
 import sys
 from pathlib import Path
 
-from . import autostart, service
+from . import autostart, service, single_instance
 from .bridge import describe_bindings
 from .config import Config, config_path
 
@@ -112,16 +112,24 @@ def main(argv: list[str] | None = None) -> int:
         print("saved to", args.config or config_path())
         return 0
 
+    if not single_instance.acquire():
+        logging.error("another qs1r-tmate is already running; two bridges "
+                      "fight over the panel, so this one will exit")
+        return 1
+
     options = service.Options(
         dry_run=args.dry_run,
         duration=args.duration,
         use_display=not args.no_display,
         retry=not args.no_retry and args.duration == 0.0,
     )
-    if args.tray:
-        from . import tray
-        return tray.main(options)
-    return service.run(config, options)
+    try:
+        if args.tray:
+            from . import tray
+            return tray.main(options)
+        return service.run(config, options)
+    finally:
+        single_instance.release()
 
 
 if __name__ == "__main__":

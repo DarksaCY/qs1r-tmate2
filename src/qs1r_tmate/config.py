@@ -77,8 +77,8 @@ DEFAULTS = {
         "e1_action": "agc", "e2_action": "filter",
     },
     "buttons": {
-        "f1": "mode:LSB", "f2": "mode:USB", "f3": "mode:CW",
-        "f4": "mode:AM", "f5": "mode:SAM", "f6": "mode:DIG",
+        "f1": "mode:AM", "f2": "mode:SAM", "f3": "mode:LSB",
+        "f4": "mode:DSB", "f5": "mode:USB", "f6": "mode:CW",
         "main": "step", "e1": "mute", "e2": "filter_reset",
     },
     "display": {"enabled": True, "backlight": [255, 160, 0]},
@@ -149,8 +149,8 @@ class Config:
     knob_actions: dict = field(
         default_factory=lambda: {"E1": "agc", "E2": "filter"})
     buttons: dict = field(default_factory=lambda: {
-        "F1": "mode:LSB", "F2": "mode:USB", "F3": "mode:CW",
-        "F4": "mode:AM", "F5": "mode:SAM", "F6": "mode:DIG",
+        "F1": "mode:AM", "F2": "mode:SAM", "F3": "mode:LSB",
+        "F4": "mode:DSB", "F5": "mode:USB", "F6": "mode:CW",
         "MAIN": "step", "E1": "mute", "E2": "filter_reset",
     })
     display_enabled: bool = True

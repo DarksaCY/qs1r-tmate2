@@ -81,7 +81,7 @@ and exit.
 |---|---|
 | Main knob | tune the VFO by the current step |
 | Push main knob | cycle step: 1, 10, 50, 100, 500, 1000, 5000, 10000 Hz |
-| F1 … F6 | LSB, USB, CW, AM, SAM, DIG |
+| F1 … F6 | AM, SAM, LSB, DSB, USB, CW |
 | E1 knob / push | AGC threshold / mute |
 | E2 knob / push | filter width / reset filter |
 

@@ -138,11 +138,22 @@ bits 7..4; 8..11 are byte 31 bits 4..7; 12..15 are byte 30 bits 7..4.
 
 ### Annunciators
 
-Mode indicators live in bytes 22 and 23: `cw_plus`, `cw_minus`, `dig_plus`,
-`dig_minus`, `dsb`, `fm`, `usb`, `sam` in byte 22 bits 0..7, and `drm`, `dig`,
-`stereo`, `dbm`, `cw`, `lsb`, `am` in byte 23. Units are `hz` (24.0), `k` (26.0),
-`mw_w` (28.0) and `mw_m` (29.0). The full table is in
-[`display.py`](../src/qs1r_tmate/display.py).
+Mode indicators live in bytes 22 and 23. Every bit of both was swept one at a
+time and read off the panel, so this table is observed rather than inherited:
+
+| Bit | Byte 22 | Byte 23 |
+|---|---|---|
+| 0 | the dot of the CW marker | `DRM` |
+| 1 | the upper minus | `DIG` |
+| 2 | the plus | `STEREO` |
+| 3 | the lower minus | nothing |
+| 4 | `DSB` | `dBm` |
+| 5 | `FM` | `CW` |
+| 6 | `USB` | `LSB` |
+| 7 | `SAM` | `AM` |
+
+Units are `hz` (24.0), `k` (26.0), `mw_w` (28.0) and `mw_m` (29.0). The full
+table is in [`display.py`](../src/qs1r_tmate/display.py).
 
 ### Panel
 
