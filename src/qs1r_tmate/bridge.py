@@ -42,14 +42,21 @@ BUTTON_MODES = {
 #: relative to the counter. Flip this to +1 if you prefer the raw direction.
 TUNE_SIGN = -1
 
-#: Backlight colour.  The green LED is far weaker than red and blue: 255,255,255
-#: reads as purple on the panel, and white needs roughly this ratio.  Calibrated
-#: by eye against the real device.
-BACKLIGHT = (32, 255, 32)
+#: Backlight colour, remembered per user in the state file.  The green LED is
+#: far weaker than red and blue, so values do not behave like sRGB: 255,255,255
+#: reads as purple and white is nearer 32,255,32.  Calibrated against the panel.
+BACKLIGHT = (255, 160, 0)
 
 #: Rewrite the panel at least this often, in seconds.  The LCD holds its content
 #: while the HID handle is open, but a steady refresh keeps it certain.
 DISPLAY_REFRESH = 1.0
+
+#: How often to read the signal level, in seconds.  Unlike the other read-backs
+#: this one is never suppressed after a command: the meter should stay live
+#: while the knob is moving.
+SMETER_INTERVAL = 0.2
+#: Redraw the meter only once it has moved by this much, to keep USB writes down.
+SMETER_HYSTERESIS_DB = 1.0
 
 #: How often to look for changes made in SDRMAX itself, in seconds.
 SYNC_INTERVAL = 0.25
@@ -105,6 +112,7 @@ class State:
     step_index: int = 2
     filter_low: int = -5072
     filter_high: int = 5072
+    backlight: list = field(default_factory=lambda: list(BACKLIGHT))
     _path: Path = field(default_factory=_state_path, repr=False, compare=False)
 
     @property
@@ -142,9 +150,11 @@ class Bridge:
         self._last_command_at = 0.0
         self._last_sync_at = 0.0
         self._last_display_at = 0.0
+        self._last_smeter_at = 0.0
+        self._smeter_dbm: float | None = None
         self.display = display
         if self.display is not None:
-            self.display.set_rgb(*BACKLIGHT)
+            self.display.set_rgb(*self.state.backlight)
             # Every report replaces the whole device state, so the encoder
             # profile has to ride along on all of them.  All three speeds are 1:
             # no hardware acceleration, one count per detent.
@@ -245,11 +255,28 @@ class Bridge:
         panel.set_underline(len(str(self.state.step)))
         if self.state.muted:
             panel.set_flag("vol")
+        if self._smeter_dbm is not None:
+            panel.set_smeter_scale()
+            panel.set_smeter(self._smeter_dbm)
         try:
             self.controller.write(panel.render())
         except OSError as exc:
             log.debug("display write failed: %s", exc)
         self._last_display_at = time.monotonic()
+
+    def read_smeter(self) -> bool:
+        """Read the signal level.  Returns True if the panel should be redrawn."""
+        if self.dry_run or self.display is None:
+            return False
+        try:
+            dbm = self.radio.get_smeter()
+        except (OSError, SdrMaxError) as exc:
+            log.debug("S-meter read failed: %s", exc)
+            return False
+        moved = (self._smeter_dbm is None
+                 or abs(dbm - self._smeter_dbm) >= SMETER_HYSTERESIS_DB)
+        self._smeter_dbm = dbm
+        return moved
 
     # -- event handling -----------------------------------------------------
 
@@ -354,6 +381,10 @@ class Bridge:
                 if events:
                     dirty |= self.handle(events)
                 now = time.monotonic()
+                if now - self._last_smeter_at >= SMETER_INTERVAL:
+                    self._last_smeter_at = now
+                    if self.read_smeter():
+                        self.refresh_display()
                 if (now - self._last_sync_at >= SYNC_INTERVAL
                         and now - self._last_command_at >= SYNC_QUIET_PERIOD):
                     self._last_sync_at = now

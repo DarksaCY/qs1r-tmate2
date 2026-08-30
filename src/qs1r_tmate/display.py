@@ -98,6 +98,30 @@ BAR_COUNT = len(BAR_BITS)
 MAIN_DIGITS = 9
 SMETER_DIGITS = 3
 
+#: S9 is -73 dBm on HF, and one S-unit is 6 dB.  The bar appears to be laid out
+#: as one segment per S-unit up to S9, then 10 dB per segment for the +10..+60
+#: part, which is exactly 15 segments.
+S9_DBM = -73.0
+DB_PER_S_UNIT = 6.0
+DB_PER_BAR_OVER_S9 = 10.0
+BARS_AT_S9 = 9
+
+#: Scale legend around the bar: the S1..S9 ticks and the +10..+60 ticks.
+SCALE_FLAGS = (
+    "smeter_line", "smeter_s1", "smeter_s3", "smeter_s5", "smeter_s7",
+    "smeter_s9", "smeter_10", "smeter_20", "smeter_40", "smeter_60",
+    "s", "smeter_plus20", "smeter_plus40", "smeter_plus60",
+)
+
+
+def dbm_to_bars(dbm: float) -> int:
+    """Map a level in dBm onto the fifteen bar segments."""
+    if dbm <= S9_DBM:
+        bars = round((dbm - S9_DBM) / DB_PER_S_UNIT) + BARS_AT_S9
+    else:
+        bars = BARS_AT_S9 + round((dbm - S9_DBM) / DB_PER_BAR_OVER_S9)
+    return max(0, min(BAR_COUNT, int(bars)))
+
 #: SDRMAX mode -> annunciator on the LCD.
 MODE_FLAGS = {
     "AM": "am", "SAM": "sam", "LSB": "lsb", "USB": "usb",
@@ -188,6 +212,21 @@ class Display:
         text = text[-SMETER_DIGITS:].rjust(SMETER_DIGITS)
         for position in range(1, SMETER_DIGITS + 1):
             self.set_smeter_digit(position, text[SMETER_DIGITS - position])
+        return self
+
+    def set_smeter_scale(self, on: bool = True) -> "Display":
+        """Light the tick legend printed around the bar."""
+        for flag in SCALE_FLAGS:
+            self.set_flag(flag, on)
+        return self
+
+    def set_smeter(self, dbm: float) -> "Display":
+        """Show a level in dBm on the bar and the three S-meter digits."""
+        self.set_bars(dbm_to_bars(dbm))
+        value = int(round(dbm))
+        self.set_smeter_text(str(abs(value)))
+        self.set_flag("smeter_db_minus", value < 0)
+        self.set_flag("dbm", True)
         return self
 
     def set_bars(self, count: int) -> "Display":

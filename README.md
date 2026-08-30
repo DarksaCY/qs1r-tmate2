@@ -62,8 +62,13 @@ your settings.
 | E2 knob / push | filter width / reset filter |
 
 The controller LCD shows the frequency grouped as `14.223.500`, lights the mode
-annunciator, and underlines the digit the current tuning step moves. Turn it off
-with `--no-display`, or recolour the backlight with `--backlight R,G,B`.
+annunciator, underlines the digit the current tuning step moves, and drives the
+S-meter bar and its dBm readout live. Turn it off with `--no-display`.
+
+The backlight is set with `--backlight R,G,B` and remembered for later runs.
+Note that the values do not behave like sRGB, because the green LED is much
+weaker than the other two: `255,255,255` looks purple, white is near
+`32,255,32`, and amber is `255,160,0`.
 
 ## Bidirectional sync
 
@@ -91,14 +96,14 @@ Three things SDRMAX does that any client has to survive — all documented in
   `-314169 .. -307519` — with the correct width. SDRMAX's own display shows the
   same, so it is not a protocol error. The bridge validates them and falls back
   to a per-mode default.
-* **No S-meter.** The signal level is not exposed by any query.
+* **The S-meter is well hidden.** No query named after `smeter`, `level` or
+  `dbm` works; the one that does is `?SmeterValue`, which appears in the binary
+  only as a settings key.
 
 ## Roadmap
 
 1. ~~**Vertical slice** — knob tunes, buttons switch mode.~~ done
 2. ~~**Bidirectional sync** — SDRMAX and the controller track each other.~~ done
 3. ~~**Tmate 2 display** — frequency, mode and tuning step on the LCD.~~ done
-4. **S-meter on the panel.** The display has three digits and a fifteen-segment
-   bar for it, but SDRMAX exposes no signal level over the command protocol, so
-   this needs another source — most likely the spectrum data on UDP 43072/43076.
+4. ~~**S-meter on the panel** — live level on the bar and in dBm.~~ done
 5. Packaging: tray application, autostart, configurable bindings.

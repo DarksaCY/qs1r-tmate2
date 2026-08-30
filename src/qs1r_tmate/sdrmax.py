@@ -211,6 +211,15 @@ class SdrMax:
     def get_volume(self) -> int:
         return int(self.query("vol"))
 
+    def get_smeter(self) -> float:
+        """Signal level in dBm.
+
+        The query name is absent from the binary and answers to any casing.  It
+        is the only route to the signal level: nothing else in the protocol
+        reports it.
+        """
+        return float(self.query("SmeterValue"))
+
     def get_samplerate(self) -> int:
         return int(self.query("samplerate"))
 

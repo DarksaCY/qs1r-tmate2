@@ -28,7 +28,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-display", action="store_true",
                         help="leave the controller LCD alone")
     parser.add_argument("--backlight", metavar="R,G,B",
-                        help="backlight colour, e.g. 96,255,96")
+                        help="backlight colour, e.g. 255,160,0; remembered for "
+                             "future runs")
     parser.add_argument("--reverse-tuning", action="store_true",
                         help="flip the main knob's tuning direction")
     parser.add_argument("--duration", type=float, default=0.0,
@@ -49,6 +50,9 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     state = State.load()
+    if args.backlight:
+        state.backlight = [int(v) for v in args.backlight.split(",")]
+        state.save()
 
     radio = SdrMax(args.host, args.port)
     if not args.dry_run:
@@ -80,9 +84,6 @@ def main(argv: list[str] | None = None) -> int:
             tune_sign=-TUNE_SIGN if args.reverse_tuning else TUNE_SIGN,
             display=display,
         )
-        # after Bridge(), which applies the default backlight
-        if display is not None and args.backlight:
-            display.set_rgb(*(int(v) for v in args.backlight.split(",")))
         bridge.run(duration=args.duration)
     finally:
         controller.close()

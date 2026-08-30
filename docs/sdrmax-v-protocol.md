@@ -16,7 +16,20 @@ against live hardware (QS1R s/n 20110211).
 | 43069 | `newRx1GuiTCPCmdConnection`   | RX1 GUI update channel, held by the GUI. |
 | 43071 | `newRx2GuiTCPCmdConnection`   | RX2 GUI update channel. |
 
-Two UDP sockets (43072, 43076) carry the `QsCatConnection.exe` OmniRig bridge.
+Two UDP sockets (43072, 43076) carry the same command protocol - the handlers
+are `readRx1PendingCmdDatagrams` and `readRx2PendingCmdDatagrams`, and this is
+what `QsCatConnection.exe` uses to bridge OmniRig. A datagram sent to **43072**
+gets an identical answer to the TCP channel:
+
+```
+udp 43072  <-  "?fhz
+"        ->  "fhz=9681750
+"
+```
+
+43076 did not answer. Spectrum and wideband data are separate again, on their
+own TCP servers (`SpectrumServer`, `WBDataServer`), and are not needed for
+control.
 
 ## Framing
 
@@ -71,14 +84,19 @@ found them.
 | `?WavRecord`, `?WavContinuous`, `?WavInLoop` | `WavRecord=0` |
 | `?serverpid`, `?tonefrequency` | `serverpid=12588` |
 | `?version` | `version=5.0.1.1` |
+| `?SmeterValue` | `SmeterValue=-59.7556` — signal level in dBm, live |
 | `?status` | `status=AM,9600000,100;` — mode name, frequency, and a third field |
+
+Query names are **case insensitive**: `?SmeterValue`, `?smetervalue` and
+`?SMeterValue` all answer.
 
 Names that answer `?` (not supported): `frequency`, `vfo`, `center`, `filtertaps`,
 `mflh`, `volume`, `squelch`, `agc`, `sr`, `smeter`, `dbm`, `signal`, `level`,
 `rssi`, `meter`, `band`, `notch`, `info`, `help`.
 
-There is **no S-meter query** — the signal level is not reachable this way, so
-putting it on an external display needs another route.
+The signal level took some finding: no name resembling `smeter`, `level` or
+`dbm` works, and the one that does — `SmeterValue` — appears in the binary only
+as a settings key next to `SmeterCorrection`. It updates continuously.
 
 ### Caveats found on hardware
 
