@@ -50,8 +50,8 @@ contents and change constantly, so they must be ignored.
 |---|---|---|
 | 0 | 1 | marker, normally `0x01` |
 | 1..2 | int16 LE | main encoder position, absolute |
-| 3..4 | int16 LE | E1 encoder position, absolute |
-| 5..6 | int16 LE | E2 encoder position, absolute |
+| 3..4 | int16 LE | **E2** encoder position, absolute |
+| 5..6 | int16 LE | **E1** encoder position, absolute |
 | 7..8 | 9 bits | button bitmap, **0 = pressed** |
 
 The encoders report an **absolute signed position**, not a delta: one detent
@@ -76,10 +76,16 @@ small encoders.
 | 4 | F5 |
 | 5 | F6 |
 | 6 | push on the main tuning knob |
-| 7 | push on the E1 encoder |
-| 8 | push on the E2 encoder |
+| 7 | push on the **E2** encoder |
+| 8 | push on the **E1** encoder |
 
 All released reads `0x01FF`.
+
+The two small encoders appear in **reverse order** in both the encoder words and
+the button bits: the second word is E2 and the third is E1. The Tmate2_C readme
+numbers the buttons the other way round, but its own struct has the reversed
+order, and the panel agrees with the struct - assuming the obvious order swaps
+the two knobs.
 
 ### Open question
 

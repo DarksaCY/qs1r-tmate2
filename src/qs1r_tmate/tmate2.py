@@ -10,10 +10,14 @@ Input report layout (verified on HW1.1 / FW1.3, see docs/tmate2-hid.md):
 
     byte  0      marker, normally 0x01
     bytes 1..2   main encoder position, int16 LE, absolute
-    bytes 3..4   E1 encoder position,   int16 LE, absolute
-    bytes 5..6   E2 encoder position,   int16 LE, absolute
+    bytes 3..4   E2 encoder position,   int16 LE, absolute
+    bytes 5..6   E1 encoder position,   int16 LE, absolute
     bytes 7..8   button bitmap, 9 bits, 0 = pressed
     bytes 9..63  padding, not meaningful
+
+Note the order: the second word is E2 and the third is E1, and the push buttons
+follow the same reversed order.  Confirmed on the panel - assuming the obvious
+order swaps the two small knobs.
 
 The encoders report an absolute position that survives between reports, so
 motion is the difference between successive reports.
@@ -44,8 +48,8 @@ BUTTONS = {
     4: "F5",
     5: "F6",
     6: "MAIN",  # push on the main tuning knob
-    7: "E1",    # push on the left small encoder
-    8: "E2",    # push on the right small encoder
+    7: "E2",    # the small encoders are reversed here, as they are in the
+    8: "E1",    # encoder words above
 }
 
 ENCODERS = ("MAIN", "E1", "E2")
@@ -137,7 +141,7 @@ class Tmate2:
     # -- reading ------------------------------------------------------------
 
     def _decode(self, report: bytes) -> tuple[dict[str, int], int]:
-        main, e1, e2, buttons = struct.unpack_from("<4h", report, 1)
+        main, e2, e1, buttons = struct.unpack_from("<4h", report, 1)
         return {"MAIN": main, "E1": e1, "E2": e2}, buttons & 0x1FF
 
     def write(self, report: bytes) -> int:
