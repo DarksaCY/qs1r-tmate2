@@ -67,9 +67,14 @@ SYNC_QUIET_PERIOD = 0.4
 FREQ_MIN = 10_000
 FREQ_MAX = 62_500_000
 
-VOLUME_MIN = 0
-VOLUME_MAX = 100
-VOLUME_STEP = 2
+#: AGC threshold, in dBm.  Readable and writable, so it stays in step with the
+#: SDRMAX GUI - unlike volume, which this protocol can set but never report.
+AGC_MIN = -140
+AGC_MAX = 0
+AGC_STEP = 1
+
+#: How long a transient label stays on the main display, in seconds.
+OVERLAY_SECONDS = 1.5
 
 FILTER_MIN_WIDTH = 100
 FILTER_MAX_WIDTH = 20_000
@@ -107,7 +112,7 @@ class State:
 
     frequency: int = 14_223_500
     mode: str = "USB"
-    volume: int = 20
+    agc_threshold: int = -90
     muted: bool = False
     step_index: int = 2
     filter_low: int = -5072
@@ -151,6 +156,8 @@ class Bridge:
         self._last_sync_at = 0.0
         self._last_display_at = 0.0
         self._last_smeter_at = 0.0
+        self._overlay: str | None = None
+        self._overlay_until = 0.0
         self._smeter_dbm: float | None = None
         self.display = display
         if self.display is not None:
@@ -177,14 +184,21 @@ class Bridge:
         if not self.dry_run:
             self.radio.set_mode(self.state.mode)
 
-    def _apply_volume(self) -> None:
-        log.info("volume %d", self.state.volume)
+    def _apply_agc(self) -> None:
+        log.info("AGC threshold %d dBm", self.state.agc_threshold)
         self._touch()
+        self._show("AGC %d" % self.state.agc_threshold)
         if not self.dry_run:
-            self.radio.set_volume(self.state.volume)
+            self.radio.set_agc_threshold(self.state.agc_threshold)
+
+    def _show(self, text: str) -> None:
+        """Put a transient label on the main display."""
+        self._overlay = text
+        self._overlay_until = time.monotonic() + OVERLAY_SECONDS
 
     def _apply_filter(self) -> None:
         log.info("filter %d .. %d Hz", self.state.filter_low, self.state.filter_high)
+        self._show("FIL %d" % (self.state.filter_high - self.state.filter_low))
         self._touch()
         if not self.dry_run:
             self.radio.set_filter(self.state.filter_low, self.state.filter_high)
@@ -202,6 +216,7 @@ class Bridge:
         snapshot = self.radio.snapshot()
         self.state.frequency = snapshot["frequency"]
         self.state.mode = snapshot["mode"]
+        self.state.agc_threshold = snapshot["agc_threshold"]
         low, high = snapshot["filter_low"], snapshot["filter_high"]
         if filter_is_usable(low, high):
             self.state.filter_low, self.state.filter_high = low, high
@@ -210,9 +225,10 @@ class Bridge:
                         "%s default will be used if the filter knob is turned",
                         low, high, self.state.mode)
             self.state.filter_low, self.state.filter_high = self._default_filter()
-        log.info("adopted from SDRMAX: %d Hz, %s, filter %d..%d Hz",
+        log.info("adopted from SDRMAX: %d Hz, %s, filter %d..%d Hz, AGC %d dBm",
                  self.state.frequency, self.state.mode,
-                 self.state.filter_low, self.state.filter_high)
+                 self.state.filter_low, self.state.filter_high,
+                 self.state.agc_threshold)
 
     def _default_filter(self) -> tuple[int, int]:
         return DEFAULT_FILTERS.get(self.state.mode, (-3000, 3000))
@@ -225,6 +241,7 @@ class Bridge:
         try:
             frequency = self.radio.get_frequency()
             mode = self.radio.get_mode()
+            agc = self.radio.get_agc_threshold()
         except (OSError, SdrMaxError) as exc:
             log.debug("read-back failed: %s", exc)
             return False
@@ -237,6 +254,10 @@ class Bridge:
             log.info("SDRMAX changed the mode to %s", mode)
             self.state.mode = mode
             changed = True
+        if agc != self.state.agc_threshold:
+            log.info("SDRMAX changed the AGC threshold to %d dBm", agc)
+            self.state.agc_threshold = agc
+            changed = True
         return changed
 
     # -- panel --------------------------------------------------------------
@@ -246,7 +267,11 @@ class Bridge:
         if self.display is None:
             return
         panel = self.display.clear()
-        panel.set_frequency(self.state.frequency)
+        if self._overlay is not None and time.monotonic() < self._overlay_until:
+            panel.set_main_text(self._overlay)
+        else:
+            self._overlay = None
+            panel.set_frequency(self.state.frequency)
         panel.set_mode(self.state.mode)
         panel.set_flag("vfo")
         panel.set_flag("rx")
@@ -285,10 +310,10 @@ class Bridge:
         self.state.frequency = max(FREQ_MIN, min(FREQ_MAX, freq))
         self._apply_frequency()
 
-    def _adjust_volume(self, detents: int) -> None:
-        volume = self.state.volume + detents * VOLUME_STEP
-        self.state.volume = max(VOLUME_MIN, min(VOLUME_MAX, volume))
-        self._apply_volume()
+    def _adjust_agc(self, detents: int) -> None:
+        value = self.state.agc_threshold + detents * AGC_STEP
+        self.state.agc_threshold = max(AGC_MIN, min(AGC_MAX, value))
+        self._apply_agc()
 
     def _adjust_filter(self, detents: int) -> None:
         widen = detents * FILTER_STEP
@@ -310,11 +335,12 @@ class Bridge:
     def _cycle_step(self) -> None:
         self.state.step_index = (self.state.step_index + 1) % len(STEP_SIZES)
         log.info("tuning step %d Hz", self.state.step)
+        self._show("STEP %d" % self.state.step)
 
     def handle(self, events) -> bool:
         """Apply a batch of controller events.  Returns True if anything changed."""
         tune_detents = 0
-        volume_detents = 0
+        agc_detents = 0
         filter_detents = 0
         changed = False
 
@@ -323,7 +349,7 @@ class Bridge:
                 if event.encoder == "MAIN":
                     tune_detents += event.delta
                 elif event.encoder == "E1":
-                    volume_detents += event.delta
+                    agc_detents += event.delta
                 elif event.encoder == "E2":
                     filter_detents += event.delta
             elif isinstance(event, ButtonEvent) and event.pressed:
@@ -333,8 +359,8 @@ class Bridge:
         if tune_detents:
             self._tune(tune_detents)
             changed = True
-        if volume_detents:
-            self._adjust_volume(volume_detents)
+        if agc_detents:
+            self._adjust_agc(agc_detents)
             changed = True
         if filter_detents:
             self._adjust_filter(filter_detents)
@@ -366,7 +392,7 @@ class Bridge:
             duration: float = 0.0) -> None:
         log.info(
             "bridge running - main knob tunes, F1-F6 set mode, "
-            "push main knob cycles step, E1 volume, E2 filter"
+            "push main knob cycles step, E1 AGC threshold, E2 filter"
         )
         self.adopt_from_radio()
         self.refresh_display()
@@ -407,6 +433,6 @@ def describe_bindings() -> str:
                  ", ".join(f"{s}" for s in STEP_SIZES) + " Hz")
     for button, mode in BUTTON_MODES.items():
         lines.append(f"  {button}               mode {mode}")
-    lines.append("  E1 knob          volume     |  push E1  mute on/off")
+    lines.append("  E1 knob          AGC threshold  |  push E1  mute on/off")
     lines.append("  E2 knob          filter width  |  push E2  reset filter")
     return "\n".join(lines)

@@ -58,12 +58,13 @@ your settings.
 | Main knob | tune the VFO by the current step |
 | Push main knob | cycle step: 1, 10, 50, 100, 500, 1000, 5000, 10000 Hz |
 | F1 … F6 | LSB, USB, CW, AM, SAM, DIG |
-| E1 knob / push | volume / mute |
+| E1 knob / push | AGC threshold / mute |
 | E2 knob / push | filter width / reset filter |
 
 The controller LCD shows the frequency grouped as `14.223.500`, lights the mode
 annunciator, underlines the digit the current tuning step moves, and drives the
-S-meter bar and its dBm readout live. Turn it off with `--no-display`.
+S-meter bar and its dBm readout live. Turning a small knob briefly replaces the
+frequency with what it is changing - `AGC -90`, `FIL 3000`, `STEP 100`. Turn it off with `--no-display`.
 
 The backlight is set with `--backlight R,G,B` and remembered for later runs.
 Note that the values do not behave like sRGB, because the green LED is much
@@ -91,7 +92,9 @@ Three things SDRMAX does that any client has to survive — all documented in
 
 * **Volume is effectively write-only.** `>vol` changes the audio but does not
   move the GUI slider, and `?vol` read `0` while the receiver was audibly
-  playing. The bridge never touches volume unless a knob asks it to.
+  playing. Since the bridge cannot read it back, it would have to guess a
+  starting point, so the E1 knob carries the AGC threshold instead - which is
+  readable, stays in step with the GUI, and does much the same job by ear.
 * **Filter edges can be nonsense.** `?fl`/`?fh` have returned
   `-314169 .. -307519` — with the correct width. SDRMAX's own display shows the
   same, so it is not a protocol error. The bridge validates them and falls back

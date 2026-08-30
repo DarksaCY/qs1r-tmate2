@@ -184,6 +184,12 @@ class SdrMax:
     def set_volume(self, value: int) -> None:
         self.command("vol", int(value))
 
+    def set_agc_threshold(self, dbm: int) -> None:
+        self.command("agcthreshold", int(dbm))
+
+    def get_agc_threshold(self) -> int:
+        return int(float(self.query("agcthreshold")))
+
     def set_mute(self, muted: bool) -> None:
         self.command("mute", 1 if muted else 0)
 
@@ -234,4 +240,5 @@ class SdrMax:
             "mode": self.get_mode(),
             "filter_low": low,
             "filter_high": high,
+            "agc_threshold": self.get_agc_threshold(),
         }
