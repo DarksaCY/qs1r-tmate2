@@ -30,8 +30,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--backlight", metavar="R,G,B",
                         help="backlight colour, e.g. 255,160,0; remembered for "
                              "future runs")
+    parser.add_argument("--invert", metavar="LIST",
+                        help="flip the direction of these knobs, e.g. MAIN,E1; "
+                             "remembered for future runs")
     parser.add_argument("--reverse-tuning", action="store_true",
-                        help="flip the main knob's tuning direction")
+                        help="flip the main knob direction (same as --invert MAIN)")
     parser.add_argument("--duration", type=float, default=0.0,
                         help="stop after this many seconds (0 = run until Ctrl-C)")
     parser.add_argument("--dry-run", action="store_true",
@@ -50,6 +53,10 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     state = State.load()
+    if args.invert:
+        for name in (n.strip().upper() for n in args.invert.split(",")):
+            state.encoder_signs[name] = -state.encoder_signs.get(name, 1)
+        state.save()
     if args.backlight:
         state.backlight = [int(v) for v in args.backlight.split(",")]
         state.save()
@@ -81,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         bridge = Bridge(
             radio, controller, state,
             dry_run=args.dry_run,
-            tune_sign=-TUNE_SIGN if args.reverse_tuning else TUNE_SIGN,
+            tune_sign=-state.encoder_signs["MAIN"] if args.reverse_tuning else None,
             display=display,
         )
         bridge.run(duration=args.duration)

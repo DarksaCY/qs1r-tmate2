@@ -38,9 +38,14 @@ BUTTON_MODES = {
     "F6": "DIG",
 }
 
-#: The main encoder counts up when turned anticlockwise, so tuning is inverted
-#: relative to the counter. Flip this to +1 if you prefer the raw direction.
-TUNE_SIGN = -1
+#: Direction of each encoder, measured on the panel: turned clockwise the main
+#: knob reports negative deltas and the two small ones positive.  The signs here
+#: turn every knob into "clockwise increases": frequency up, filter wider, and -
+#: because a lower AGC threshold means more gain on weak signals - AGC louder.
+ENCODER_SIGNS = {"MAIN": -1, "E1": -1, "E2": 1}
+
+#: Kept for the --reverse-tuning flag.
+TUNE_SIGN = ENCODER_SIGNS["MAIN"]
 
 #: Backlight colour, remembered per user in the state file.  The green LED is
 #: far weaker than red and blue, so values do not behave like sRGB: 255,255,255
@@ -114,6 +119,7 @@ class State:
     mode: str = "USB"
     agc_threshold: int = -90
     muted: bool = False
+    encoder_signs: dict = field(default_factory=lambda: dict(ENCODER_SIGNS))
     step_index: int = 2
     filter_low: int = -5072
     filter_high: int = 5072
@@ -145,13 +151,14 @@ class State:
 
 class Bridge:
     def __init__(self, radio: SdrMax, controller: Tmate2, state: State | None = None,
-                 dry_run: bool = False, tune_sign: int = TUNE_SIGN,
+                 dry_run: bool = False, tune_sign: int | None = None,
                  display: Display | None = None) -> None:
         self.radio = radio
         self.controller = controller
         self.state = state or State.load()
         self.dry_run = dry_run
-        self.tune_sign = tune_sign
+        if tune_sign is not None:
+            self.state.encoder_signs["MAIN"] = tune_sign
         self._last_command_at = 0.0
         self._last_sync_at = 0.0
         self._last_display_at = 0.0
@@ -306,7 +313,7 @@ class Bridge:
     # -- event handling -----------------------------------------------------
 
     def _tune(self, detents: int) -> None:
-        freq = self.state.frequency + self.tune_sign * detents * self.state.step
+        freq = self.state.frequency + detents * self.state.step
         self.state.frequency = max(FREQ_MIN, min(FREQ_MAX, freq))
         self._apply_frequency()
 
@@ -346,12 +353,13 @@ class Bridge:
 
         for event in events:
             if isinstance(event, EncoderEvent):
+                detents = event.delta * self.state.encoder_signs.get(event.encoder, 1)
                 if event.encoder == "MAIN":
-                    tune_detents += event.delta
+                    tune_detents += detents
                 elif event.encoder == "E1":
-                    agc_detents += event.delta
+                    agc_detents += detents
                 elif event.encoder == "E2":
-                    filter_detents += event.delta
+                    filter_detents += detents
             elif isinstance(event, ButtonEvent) and event.pressed:
                 changed |= self._handle_button(event.button)
 

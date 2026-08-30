@@ -43,8 +43,12 @@ python -m qs1r_tmate
 ```
 
 Useful flags: `--dry-run` decodes the controller without touching the receiver,
-`--freq` seeds the VFO, `--port` selects a different command channel,
-`--reverse-tuning` flips the knob direction.
+`--freq` tunes at startup, `--port` selects a different command channel, and
+`--invert MAIN,E1,E2` flips the direction of any knob and remembers it.
+
+Turned clockwise the main knob reports negative deltas and the two small ones
+positive, so each is signed to make clockwise mean "more": frequency up, filter
+wider, and AGC louder - which is a *lower* threshold, hence the inversion on E1.
 
 On startup the bridge sends only frequency and mode. Volume and filter are left
 exactly as SDRMAX has them and are touched only when a knob asks for a change —
