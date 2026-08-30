@@ -11,7 +11,7 @@ import logging
 import os
 import threading
 
-from . import service
+from . import autostart, service
 from .config import Config, config_path
 
 log = logging.getLogger(__name__)
@@ -73,6 +73,13 @@ class TrayApp:
         log.info("reloading the configuration")
         self._restart.set()
 
+    def _autostart_enabled(self, _item=None) -> bool:
+        return autostart.enabled()
+
+    def _toggle_autostart(self, *_args) -> None:
+        state = autostart.toggle()
+        log.info("start at login: %s", "on" if state else "off")
+
     def _exit(self, icon, *_args) -> None:
         self._quit.set()
         icon.stop()
@@ -88,6 +95,8 @@ class TrayApp:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Open configuration", self._open_config),
             pystray.MenuItem("Apply configuration", self._apply_config),
+            pystray.MenuItem("Start at login", self._toggle_autostart,
+                             checked=self._autostart_enabled),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Quit", self._exit),
         )

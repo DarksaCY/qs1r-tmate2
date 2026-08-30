@@ -12,3 +12,5 @@ dist/
 scratch/
 *.strings.txt
 *.qsi
+*.spec
+packaging/__pycache__/

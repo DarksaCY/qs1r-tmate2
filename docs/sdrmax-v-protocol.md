@@ -5,7 +5,7 @@ a Qt 5 application that contains both the `QS1RServer` object and the GUI.  The
 GUI is an ordinary TCP client of that server — so every control the GUI offers
 is reachable over the network.  None of this is documented by the vendor; it was
 recovered from the strings and symbols of `SDRMAXV.exe` and then verified
-against live hardware (QS1R s/n 20110211).
+against live hardware.
 
 ## Ports
 

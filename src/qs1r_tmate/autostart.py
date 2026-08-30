@@ -26,7 +26,27 @@ def _pythonw() -> str:
 
 
 def command_line() -> str:
+    """What to register, whether running from source or from a built exe."""
+    if getattr(sys, "frozen", False):
+        executable = Path(sys.executable)
+        # The tray build needs no argument; the console build has to be told.
+        if "tray" in executable.stem.lower():
+            return f'"{executable}"'
+        return f'"{executable}" --tray'
     return f'"{_pythonw()}" -m qs1r_tmate --tray'
+
+
+def enabled() -> bool:
+    return current() is not None
+
+
+def toggle() -> bool:
+    """Turn autostart on or off.  Returns the new state."""
+    if enabled():
+        remove()
+        return False
+    install()
+    return True
 
 
 def install() -> str:
