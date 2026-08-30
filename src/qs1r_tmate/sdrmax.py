@@ -1,0 +1,178 @@
+"""Client for the undocumented SDRMAX V command server.
+
+SDRMAX V (Software Radio Laboratory LLC, 2013) hosts a QS1RServer object that
+listens on four TCP ports.  Its own GUI is just a network client of that server,
+so anything the GUI can do is reachable over the wire.
+
+Protocol (reverse engineered, see docs/sdrmax-v-protocol.md):
+
+    request   >command arg\n     ->  OK\n
+    query     ?name\n            ->  name=value\n
+
+Requests may be pipelined: several lines in one write produce one response line
+each, in order.
+"""
+
+from __future__ import annotations
+
+import logging
+import socket
+import threading
+
+log = logging.getLogger(__name__)
+
+#: RX1 command channel.  The SDRMAX GUI holds this one; a second client is
+#: accepted but never answered, so we do not use it.
+PORT_RX1_CMD = 43065
+#: RX2 command channel.  Unused by the GUI and fully functional - our channel.
+PORT_RX2_CMD = 43067
+#: GUI update channels for RX1 / RX2.
+PORT_RX1_GUI = 43069
+PORT_RX2_GUI = 43071
+
+#: Mode argument for ``>mode``.  Verified against the GUI on hardware; note that
+#: this is *not* the left-to-right order of the mode buttons (USB and DSB are
+#: swapped there).
+MODES = {
+    "AM": 0,
+    "SAM": 1,
+    "LSB": 2,
+    "USB": 3,
+    "DSB": 4,
+    "CW": 5,
+    "FMN": 6,
+    "DIG": 7,
+}
+MODE_NAMES = {v: k for k, v in MODES.items()}
+
+
+class SdrMaxError(RuntimeError):
+    pass
+
+
+class SdrMax:
+    """A line-oriented connection to the SDRMAX V command server.
+
+    The connection is re-established transparently if it drops, so the bridge
+    keeps working across an SDRMAX restart.
+    """
+
+    def __init__(self, host: str = "127.0.0.1", port: int = PORT_RX2_CMD,
+                 timeout: float = 2.0) -> None:
+        self.host = host
+        self.port = port
+        self.timeout = timeout
+        self._sock: socket.socket | None = None
+        self._buf = b""
+        self._lock = threading.Lock()
+
+    # -- connection ---------------------------------------------------------
+
+    def connect(self) -> None:
+        self.close()
+        sock = socket.create_connection((self.host, self.port), self.timeout)
+        sock.settimeout(self.timeout)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        self._sock = sock
+        self._buf = b""
+        log.info("connected to SDRMAX V at %s:%d", self.host, self.port)
+
+    def close(self) -> None:
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+            self._sock = None
+
+    @property
+    def connected(self) -> bool:
+        return self._sock is not None
+
+    def __enter__(self) -> "SdrMax":
+        self.connect()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+    # -- raw transport ------------------------------------------------------
+
+    def _readline(self) -> str:
+        assert self._sock is not None
+        while b"\n" not in self._buf:
+            chunk = self._sock.recv(4096)
+            if not chunk:
+                raise SdrMaxError("server closed the connection")
+            self._buf += chunk
+        line, _, self._buf = self._buf.partition(b"\n")
+        return line.decode("ascii", "replace").strip()
+
+    def _roundtrip(self, line: str) -> str:
+        if self._sock is None:
+            self.connect()
+        assert self._sock is not None
+        self._sock.sendall((line + "\n").encode("ascii"))
+        return self._readline()
+
+    def _send(self, line: str, retry: bool = True) -> str:
+        with self._lock:
+            try:
+                return self._roundtrip(line)
+            except (OSError, SdrMaxError):
+                self.close()
+                if not retry:
+                    raise
+                self.connect()
+                return self._roundtrip(line)
+
+    # -- protocol -----------------------------------------------------------
+
+    def command(self, cmd: str, *args) -> str:
+        """Send ``>cmd args`` and return the reply (normally ``OK``)."""
+        line = ">" + cmd
+        if args:
+            line += " " + " ".join(str(a) for a in args)
+        reply = self._send(line)
+        if reply != "OK":
+            log.debug("command %r answered %r", line, reply)
+        return reply
+
+    def query(self, name: str) -> str:
+        """Send ``?name`` and return the value part of the ``name=value`` reply."""
+        reply = self._send("?" + name)
+        key, sep, value = reply.partition("=")
+        if not sep:
+            raise SdrMaxError(f"malformed reply to ?{name}: {reply!r}")
+        return value
+
+    # -- convenience --------------------------------------------------------
+
+    def server_pid(self) -> int:
+        return int(self.query("serverpid"))
+
+    def is_running(self) -> bool:
+        return self.query("start") == "1"
+
+    def set_frequency(self, hz: int) -> None:
+        self.command("fhz", int(hz))
+
+    def set_mode(self, mode: str | int) -> None:
+        value = MODES[mode.upper()] if isinstance(mode, str) else int(mode)
+        self.command("mode", value)
+
+    def set_filter(self, low: int, high: int) -> None:
+        self.command("fl", int(low))
+        self.command("fh", int(high))
+
+    def set_volume(self, value: int) -> None:
+        self.command("vol", int(value))
+
+    def set_mute(self, muted: bool) -> None:
+        self.command("mute", 1 if muted else 0)
+
+    def start(self) -> None:
+        self.command("start")
+
+    def stop(self) -> None:
+        self.command("stop")

@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-PnpDevice -PresentOnly | Where-Object { $_.Class -in @\\('HIDClass','USB','Ports','AudioEndpoint','MEDIA','libusbK','WinUSB','USBDevice'\\) } | Select-Object Class,FriendlyName,InstanceId | Sort-Object Class | Format-Table -AutoSize -Wrap)",
+      "PowerShell(Get-ChildItem -Recurse -Force \"C:\\\\Program Files \\(x86\\)\\\\SDRMAXV\" -ErrorAction SilentlyContinue | Select-Object @{n='Rel';e={$_.FullName.Replace\\('C:\\\\Program Files \\(x86\\)\\\\SDRMAXV',''\\)}},Length,LastWriteTime | Sort-Object Rel | Format-Table -AutoSize)",
+      "PowerShell(Get-ChildItem -Recurse -Force \"C:\\\\Users\\\\darks\\\\Downloads\\\\QS1R_soft\" -ErrorAction SilentlyContinue | Select-Object @{n='Rel';e={$_.FullName.Replace\\('C:\\\\Users\\\\darks\\\\Downloads\\\\QS1R_soft',''\\)}},Length,LastWriteTime | Sort-Object Rel | Format-Table -AutoSize)",
+      "PowerShell(Get-PnpDevice | Where-Object { $_.FriendlyName -match 'QS1R|libusb|Cypress|EZ-USB|Direct Sampling' -or $_.InstanceId -match 'VID_FFFE|VID_04B4' } | Select-Object Status,Present,Class,FriendlyName,InstanceId | Format-Table -AutoSize -Wrap)",
+      "WebSearch",
+      "PowerShell(python -m pip install --quiet --disable-pip-version-check hidapi 2>&1)",
+      "PowerShell(python -c \"import hid; print\\('hidapi import OK'\\)\")",
+      "PowerShell(python \"C:\\\\Users\\\\darks\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-darks-SDR-CONTROL\\\\e09b9272-12fc-4868-8a7d-80f1da5f187a\\\\scratchpad\\\\hid_enum.py\")",
+      "PowerShell(python \"C:\\\\Users\\\\darks\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-darks-SDR-CONTROL\\\\e09b9272-12fc-4868-8a7d-80f1da5f187a\\\\scratchpad\\\\hid_capture.py\" 2>&1)",
+      "PowerShell(python \"C:\\\\Users\\\\darks\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-darks-SDR-CONTROL\\\\e09b9272-12fc-4868-8a7d-80f1da5f187a\\\\scratchpad\\\\analyze.py\" 2>&1)",
+      "PowerShell(git -C $repo add -A)",
+      "PowerShell(git -C $repo log --oneline)",
+      "PowerShell(git -C $repo status --short)"
+    ]
+  }
+}
