@@ -23,8 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=PORT_RX2_CMD,
                         help="command port (default: %(default)s, the free RX2 channel)")
     parser.add_argument("--freq", type=int, default=None,
-                        help="seed the VFO with this frequency in Hz instead of the "
-                             "last saved one")
+                        help="tune the receiver to this frequency in Hz at startup")
     parser.add_argument("--reverse-tuning", action="store_true",
                         help="flip the main knob's tuning direction")
     parser.add_argument("--duration", type=float, default=0.0,
@@ -45,16 +44,16 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     state = State.load()
-    if args.freq is not None:
-        state.frequency = args.freq
 
     radio = SdrMax(args.host, args.port)
     if not args.dry_run:
         try:
             radio.connect()
-            logging.info("SDRMAX V server pid %d, receiver %s",
-                         radio.server_pid(),
+            logging.info("SDRMAX V %s, server pid %d, receiver %s",
+                         radio.get_version(), radio.server_pid(),
                          "running" if radio.is_running() else "stopped")
+            if args.freq is not None:
+                radio.set_frequency(args.freq)
         except (OSError, SdrMaxError) as exc:
             logging.error("cannot reach SDRMAX V on %s:%d - is it running? (%s)",
                           args.host, args.port, exc)

@@ -1,10 +1,13 @@
-"""The bridge: Tmate 2 controller events -> SDRMAX V commands.
+"""The bridge: Tmate 2 controller events <-> SDRMAX V.
 
-SDRMAX V's command protocol has no way to read the current VFO frequency back
-(there is ``>fhz`` but no ``?fhz``), so the bridge owns the frequency and
-persists it between runs.  Tuning SDRMAX with the mouse while the bridge is
-running will therefore desynchronise the two; closing that gap needs the CAT
-rig-script channel, which is the next milestone.
+The receiver is the single source of truth.  Almost every SDRMAX setter has a
+matching, undocumented getter (``?fhz``, ``?mode``, ``?fl`` ...), so the bridge
+adopts the receiver's real state on startup and keeps watching it: tuning
+SDRMAX with the mouse moves the bridge's idea of the VFO too, and turning the
+knob moves the receiver.  Neither side owns the frequency.
+
+To avoid fighting its own commands, the bridge only reads back after a short
+quiet period with no outgoing command.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from .sdrmax import MODE_NAMES, MODES, SdrMax
+from .sdrmax import SdrMax, SdrMaxError
 from .tmate2 import ButtonEvent, EncoderEvent, Tmate2
 
 log = logging.getLogger(__name__)
@@ -38,6 +41,12 @@ BUTTON_MODES = {
 #: relative to the counter. Flip this to +1 if you prefer the raw direction.
 TUNE_SIGN = -1
 
+#: How often to look for changes made in SDRMAX itself, in seconds.
+SYNC_INTERVAL = 0.25
+#: Ignore read-back for this long after sending a command, so that a fast spin
+#: of the knob is not "corrected" by a value that is already stale.
+SYNC_QUIET_PERIOD = 0.4
+
 FREQ_MIN = 10_000
 FREQ_MAX = 62_500_000
 
@@ -48,6 +57,26 @@ VOLUME_STEP = 2
 FILTER_MIN_WIDTH = 100
 FILTER_MAX_WIDTH = 20_000
 FILTER_STEP = 50
+#: SDRMAX sometimes holds filter edges far outside the audio range (values like
+#: -314169..-307519 have been observed on its own display, with a correct width).
+#: Anything beyond this is treated as unusable rather than adopted.
+FILTER_SANE_LIMIT = 20_000
+
+#: Passband to fall back on per mode when SDRMAX's own filter is unusable.
+DEFAULT_FILTERS = {
+    "AM": (-3325, 3325),
+    "SAM": (-3325, 3325),
+    "DSB": (-3000, 3000),
+    "USB": (100, 2900),
+    "LSB": (-2900, -100),
+    "CW": (-250, 250),
+    "FMN": (-6000, 6000),
+    "DIG": (100, 2900),
+}
+
+
+def filter_is_usable(low: int, high: int) -> bool:
+    return -FILTER_SANE_LIMIT <= low < high <= FILTER_SANE_LIMIT
 
 
 def _state_path() -> Path:
@@ -99,44 +128,87 @@ class Bridge:
         self.state = state or State.load()
         self.dry_run = dry_run
         self.tune_sign = tune_sign
+        self._last_command_at = 0.0
+        self._last_sync_at = 0.0
 
     # -- actions ------------------------------------------------------------
 
+    def _touch(self) -> None:
+        self._last_command_at = time.monotonic()
+
     def _apply_frequency(self) -> None:
         log.info("VFO %10d Hz  (step %d Hz)", self.state.frequency, self.state.step)
+        self._touch()
         if not self.dry_run:
             self.radio.set_frequency(self.state.frequency)
 
     def _apply_mode(self) -> None:
         log.info("mode %s", self.state.mode)
+        self._touch()
         if not self.dry_run:
             self.radio.set_mode(self.state.mode)
 
     def _apply_volume(self) -> None:
         log.info("volume %d", self.state.volume)
+        self._touch()
         if not self.dry_run:
             self.radio.set_volume(self.state.volume)
 
     def _apply_filter(self) -> None:
         log.info("filter %d .. %d Hz", self.state.filter_low, self.state.filter_high)
+        self._touch()
         if not self.dry_run:
             self.radio.set_filter(self.state.filter_low, self.state.filter_high)
 
     def _apply_mute(self) -> None:
         log.info("mute %s", "on" if self.state.muted else "off")
+        self._touch()
         if not self.dry_run:
             self.radio.set_mute(self.state.muted)
 
-    def push_all(self) -> None:
-        """Establish the state the bridge owns.
+    def adopt_from_radio(self) -> None:
+        """Take the receiver's current settings as the starting state."""
+        if self.dry_run:
+            return
+        snapshot = self.radio.snapshot()
+        self.state.frequency = snapshot["frequency"]
+        self.state.mode = snapshot["mode"]
+        low, high = snapshot["filter_low"], snapshot["filter_high"]
+        if filter_is_usable(low, high):
+            self.state.filter_low, self.state.filter_high = low, high
+        else:
+            log.warning("SDRMAX reports an unusable filter (%d..%d Hz); the "
+                        "%s default will be used if the filter knob is turned",
+                        low, high, self.state.mode)
+            self.state.filter_low, self.state.filter_high = self._default_filter()
+        log.info("adopted from SDRMAX: %d Hz, %s, filter %d..%d Hz",
+                 self.state.frequency, self.state.mode,
+                 self.state.filter_low, self.state.filter_high)
 
-        Only frequency and mode are pushed. Volume and filter stay as the user
-        left them in SDRMAX and are sent only once a knob actually asks for a
-        change - the bridge has no way to read them back, so overwriting them on
-        startup would silently discard the operator's settings.
-        """
-        self._apply_mode()
-        self._apply_frequency()
+    def _default_filter(self) -> tuple[int, int]:
+        return DEFAULT_FILTERS.get(self.state.mode, (-3000, 3000))
+
+    def sync_from_radio(self) -> bool:
+        """Adopt changes made in SDRMAX itself.  Returns True if anything moved."""
+        if self.dry_run:
+            return False
+        changed = False
+        try:
+            frequency = self.radio.get_frequency()
+            mode = self.radio.get_mode()
+        except (OSError, SdrMaxError) as exc:
+            log.debug("read-back failed: %s", exc)
+            return False
+
+        if frequency != self.state.frequency:
+            log.info("SDRMAX moved the VFO to %d Hz", frequency)
+            self.state.frequency = frequency
+            changed = True
+        if mode != self.state.mode:
+            log.info("SDRMAX changed the mode to %s", mode)
+            self.state.mode = mode
+            changed = True
+        return changed
 
     # -- event handling -----------------------------------------------------
 
@@ -153,6 +225,8 @@ class Bridge:
     def _adjust_filter(self, detents: int) -> None:
         widen = detents * FILTER_STEP
         low, high = self.state.filter_low, self.state.filter_high
+        if not filter_is_usable(low, high):
+            low, high = self._default_filter()
         if low < 0:  # symmetric passband - open both edges together
             low -= widen
             high += widen
@@ -213,7 +287,7 @@ class Bridge:
             self._apply_mute()
             return True
         if button == "E2":
-            self.state.filter_low, self.state.filter_high = -5072, 5072
+            self.state.filter_low, self.state.filter_high = self._default_filter()
             self._apply_filter()
             return True
         return False
@@ -226,7 +300,7 @@ class Bridge:
             "bridge running - main knob tunes, F1-F6 set mode, "
             "push main knob cycles step, E1 volume, E2 filter"
         )
-        self.push_all()
+        self.adopt_from_radio()
         started = last_save = time.monotonic()
         dirty = False
         try:
@@ -238,6 +312,10 @@ class Bridge:
                 if events:
                     dirty |= self.handle(events)
                 now = time.monotonic()
+                if (now - self._last_sync_at >= SYNC_INTERVAL
+                        and now - self._last_command_at >= SYNC_QUIET_PERIOD):
+                    self._last_sync_at = now
+                    dirty |= self.sync_from_radio()
                 if dirty and now - last_save >= save_interval:
                     self.state.save()
                     last_save = now

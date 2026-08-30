@@ -60,18 +60,39 @@ your settings.
 | E1 knob / push | volume / mute |
 | E2 knob / push | filter width / reset filter |
 
-## Known limitation
+## Bidirectional sync
 
-SDRMAX V's TCP protocol can *set* the frequency but never reports it back, so
-the bridge owns the VFO and persists it between runs. Tuning SDRMAX with the
-mouse while the bridge is running desynchronises the two. Closing that gap needs
-the CAT rig-script channel — see the roadmap.
+The receiver is the single source of truth. Nearly every SDRMAX setter turns out
+to have a matching getter (`?fhz`, `?mode`, `?fl` …) — these names exist but
+appear nowhere in the binary as literals, so they have to be probed for. The
+bridge adopts the receiver's real state on startup and then watches it, so
+tuning with the mouse in SDRMAX moves the controller's idea of the VFO and vice
+versa. To avoid fighting its own commands it only reads back after a short quiet
+period.
+
+`tools/check_sync.py` verifies this against the real hardware: it starts the
+bridge, injects a frequency change the way the GUI would, and checks that the
+bridge adopts it.
+
+## Known quirks
+
+Three things SDRMAX does that any client has to survive — all documented in
+[docs/sdrmax-v-protocol.md](docs/sdrmax-v-protocol.md):
+
+* **Volume is effectively write-only.** `>vol` changes the audio but does not
+  move the GUI slider, and `?vol` read `0` while the receiver was audibly
+  playing. The bridge never touches volume unless a knob asks it to.
+* **Filter edges can be nonsense.** `?fl`/`?fh` have returned
+  `-314169 .. -307519` — with the correct width. SDRMAX's own display shows the
+  same, so it is not a protocol error. The bridge validates them and falls back
+  to a per-mode default.
+* **No S-meter.** The signal level is not exposed by any query.
 
 ## Roadmap
 
-1. **Vertical slice** — knob tunes, buttons switch mode. *(current)*
-2. **Bidirectional frequency** — virtual COM pair plus a custom `.rs` rig script,
-   so SDRMAX and the controller stay in sync whichever one is touched.
-3. **Tmate 2 display** — decode the 64-byte output report and put frequency,
-   mode and S-meter on the controller's LCD.
+1. ~~**Vertical slice** — knob tunes, buttons switch mode.~~ done
+2. ~~**Bidirectional sync** — SDRMAX and the controller track each other.~~ done
+3. **Tmate 2 display** — decode the 64-byte output report and put frequency and
+   mode on the controller's LCD. The S-meter will need a source other than the
+   command protocol.
 4. Packaging: tray application, autostart, configurable bindings.

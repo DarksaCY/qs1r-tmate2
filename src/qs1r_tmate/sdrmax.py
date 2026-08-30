@@ -50,6 +50,14 @@ class SdrMaxError(RuntimeError):
     pass
 
 
+class UnknownQuery(SdrMaxError):
+    """The server does not recognise this query name (it answered ``?``)."""
+
+
+class NotReadable(SdrMaxError):
+    """The name is known but cannot be read back (the server answered ``NAK``)."""
+
+
 class SdrMax:
     """A line-oriented connection to the SDRMAX V command server.
 
@@ -139,8 +147,16 @@ class SdrMax:
         return reply
 
     def query(self, name: str) -> str:
-        """Send ``?name`` and return the value part of the ``name=value`` reply."""
+        """Send ``?name`` and return the value part of the ``name=value`` reply.
+
+        The server answers an unknown name with ``?`` and a known but
+        unreadable one with ``NAK``; both are reported as errors.
+        """
         reply = self._send("?" + name)
+        if reply == "?":
+            raise UnknownQuery(name)
+        if reply == "NAK":
+            raise NotReadable(name)
         key, sep, value = reply.partition("=")
         if not sep:
             raise SdrMaxError(f"malformed reply to ?{name}: {reply!r}")
@@ -176,3 +192,37 @@ class SdrMax:
 
     def stop(self) -> None:
         self.command("stop")
+
+    # -- read-back ----------------------------------------------------------
+    #
+    # Almost every setter has a matching getter, even though the query names do
+    # not appear as literals in the binary.  ``?mute`` is the notable exception:
+    # it answers NAK.
+
+    def get_frequency(self) -> int:
+        return int(self.query("fhz"))
+
+    def get_mode(self) -> str:
+        return MODE_NAMES[int(self.query("mode"))]
+
+    def get_filter(self) -> tuple[int, int]:
+        return int(self.query("fl")), int(self.query("fh"))
+
+    def get_volume(self) -> int:
+        return int(self.query("vol"))
+
+    def get_samplerate(self) -> int:
+        return int(self.query("samplerate"))
+
+    def get_version(self) -> str:
+        return self.query("version")
+
+    def snapshot(self) -> dict:
+        """Read the settings the bridge cares about in one round trip each."""
+        low, high = self.get_filter()
+        return {
+            "frequency": self.get_frequency(),
+            "mode": self.get_mode(),
+            "filter_low": low,
+            "filter_high": high,
+        }
