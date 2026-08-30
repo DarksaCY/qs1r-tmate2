@@ -1,13 +1,12 @@
 """The bridge: Tmate 2 controller events <-> SDRMAX V.
 
 The receiver is the single source of truth.  Almost every SDRMAX setter has a
-matching, undocumented getter (``?fhz``, ``?mode``, ``?fl`` ...), so the bridge
-adopts the receiver's real state on startup and keeps watching it: tuning
-SDRMAX with the mouse moves the bridge's idea of the VFO too, and turning the
-knob moves the receiver.  Neither side owns the frequency.
+matching, undocumented getter, so the bridge adopts the receiver's real state on
+startup and keeps watching it: tuning SDRMAX with the mouse moves the
+controller's idea of the frequency and turning the knob moves the receiver.
 
-To avoid fighting its own commands, the bridge only reads back after a short
-quiet period with no outgoing command.
+What each control does comes from the configuration file, not from this module -
+see :mod:`qs1r_tmate.config`.
 """
 
 from __future__ import annotations
@@ -19,46 +18,12 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .config import KNOB_TARGETS, TOGGLE_ACTIONS, Config
 from .display import Display
 from .sdrmax import SdrMax, SdrMaxError
 from .tmate2 import ButtonEvent, EncoderEvent, Tmate2
 
 log = logging.getLogger(__name__)
-
-#: Tuning steps in Hz, cycled with a push on the main knob.
-STEP_SIZES = (1, 10, 50, 100, 500, 1000, 5000, 10000)
-
-#: Mode assigned to each function button.
-BUTTON_MODES = {
-    "F1": "LSB",
-    "F2": "USB",
-    "F3": "CW",
-    "F4": "AM",
-    "F5": "SAM",
-    "F6": "DIG",
-}
-
-#: Direction of each encoder, measured on the panel: turned clockwise the main
-#: knob reports negative deltas and the two small ones positive.  The signs here
-#: make clockwise mean "more" on all three: frequency up, AGC louder, filter
-#: wider.
-#:
-#: E1 is inverted because raising the AGC threshold makes the audio *quieter* -
-#: established by ear with an A/B test at -120 and 0 dBm, not by reasoning about
-#: what a threshold ought to do.
-ENCODER_SIGNS = {"MAIN": -1, "E1": -1, "E2": 1}
-
-#: Kept for the --reverse-tuning flag.
-TUNE_SIGN = ENCODER_SIGNS["MAIN"]
-
-#: Backlight colour, remembered per user in the state file.  The green LED is
-#: far weaker than red and blue, so values do not behave like sRGB: 255,255,255
-#: reads as purple and white is nearer 32,255,32.  Calibrated against the panel.
-BACKLIGHT = (255, 160, 0)
-
-#: Rewrite the panel at least this often, in seconds.  The LCD holds its content
-#: while the HID handle is open, but a steady refresh keeps it certain.
-DISPLAY_REFRESH = 1.0
 
 #: How often to read the signal level, in seconds.  Unlike the other read-backs
 #: this one is never suppressed after a command: the meter should stay live
@@ -73,37 +38,31 @@ SYNC_INTERVAL = 0.25
 #: of the knob is not "corrected" by a value that is already stale.
 SYNC_QUIET_PERIOD = 0.4
 
+#: Rewrite the panel at least this often, in seconds.
+DISPLAY_REFRESH = 1.0
+#: How long a transient label stays on the main display.
+OVERLAY_SECONDS = 1.5
+
 FREQ_MIN = 10_000
 FREQ_MAX = 62_500_000
-
-#: AGC threshold, in dBm.  Readable and writable, so it stays in step with the
-#: SDRMAX GUI - unlike volume, which this protocol can set but never report.
-AGC_MIN = -140
-AGC_MAX = 0
-AGC_STEP = 1
-
-#: How long a transient label stays on the main display, in seconds.
-OVERLAY_SECONDS = 1.5
 
 FILTER_MIN_WIDTH = 100
 FILTER_MAX_WIDTH = 20_000
 FILTER_STEP = 50
 #: SDRMAX sometimes holds filter edges far outside the audio range (values like
-#: -314169..-307519 have been observed on its own display, with a correct width).
+#: -314169..-307519 have been seen on its own display, with a correct width).
 #: Anything beyond this is treated as unusable rather than adopted.
 FILTER_SANE_LIMIT = 20_000
 
-#: Passband to fall back on per mode when SDRMAX's own filter is unusable.
+#: Passband to fall back on per mode when the filter in SDRMAX is unusable.
 DEFAULT_FILTERS = {
-    "AM": (-3325, 3325),
-    "SAM": (-3325, 3325),
-    "DSB": (-3000, 3000),
-    "USB": (100, 2900),
-    "LSB": (-2900, -100),
-    "CW": (-250, 250),
-    "FMN": (-6000, 6000),
-    "DIG": (100, 2900),
+    "AM": (-3325, 3325), "SAM": (-3325, 3325), "DSB": (-3000, 3000),
+    "USB": (100, 2900), "LSB": (-2900, -100), "CW": (-250, 250),
+    "FMN": (-6000, 6000), "DIG": (100, 2900),
 }
+
+#: Where an unreadable knob target starts from, since it cannot be adopted.
+UNREADABLE_START = 20
 
 
 def filter_is_usable(low: int, high: int) -> bool:
@@ -117,34 +76,19 @@ def _state_path() -> Path:
 
 @dataclass
 class State:
-    """Everything the bridge believes about the receiver."""
+    """The little that is worth remembering between runs.
 
-    frequency: int = 14_223_500
-    mode: str = "USB"
-    offset: int = 0
-    agc_threshold: int = -90
-    muted: bool = False
-    encoder_signs: dict = field(default_factory=lambda: dict(ENCODER_SIGNS))
+    Everything else - frequency, mode, filter, the knob targets - is read back
+    from the receiver on startup, so it can never be stale.
+    """
+
     step_index: int = 2
-    filter_low: int = -5072
-    filter_high: int = 5072
-    backlight: list = field(default_factory=lambda: list(BACKLIGHT))
     _path: Path = field(default_factory=_state_path, repr=False, compare=False)
-
-    @property
-    def tuned(self) -> int:
-        """The frequency actually being received: centre plus cursor offset."""
-        return self.frequency + self.offset
-
-    @property
-    def step(self) -> int:
-        return STEP_SIZES[self.step_index % len(STEP_SIZES)]
 
     @classmethod
     def load(cls) -> "State":
-        path = _state_path()
         try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
+            raw = json.loads(_state_path().read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return cls()
         fields = {f for f in cls.__dataclass_fields__ if not f.startswith("_")}
@@ -160,162 +104,174 @@ class State:
 
 
 class Bridge:
-    def __init__(self, radio: SdrMax, controller: Tmate2, state: State | None = None,
-                 dry_run: bool = False, tune_sign: int | None = None,
-                 display: Display | None = None) -> None:
+    def __init__(self, radio: SdrMax, controller: Tmate2, config: Config,
+                 state: State | None = None, display: Display | None = None,
+                 dry_run: bool = False) -> None:
         self.radio = radio
         self.controller = controller
+        self.config = config
         self.state = state or State.load()
+        self.display = display
         self.dry_run = dry_run
-        if tune_sign is not None:
-            self.state.encoder_signs["MAIN"] = tune_sign
+
+        # The receiver as last seen.
+        self.frequency = 0
+        self.offset = 0
+        self.mode = "USB"
+        self.filter_low, self.filter_high = -3000, 3000
+        self.muted = False
+        self.toggles: dict[str, bool] = {}
+        self.knob_values: dict[str, int] = {}
+
         self._last_command_at = 0.0
         self._last_sync_at = 0.0
         self._last_display_at = 0.0
         self._last_smeter_at = 0.0
+        self._smeter_dbm: float | None = None
         self._overlay: str | None = None
         self._overlay_until = 0.0
-        self._smeter_dbm: float | None = None
-        self.display = display
+
         if self.display is not None:
-            self.display.set_rgb(*self.state.backlight)
+            self.display.set_rgb(*self.config.backlight)
             # Every report replaces the whole device state, so the encoder
             # profile has to ride along on all of them.  All three speeds are 1:
             # no hardware acceleration, one count per detent.
             self.display.set_encoder_profile(1, 1, 1, 32, 64)
 
-    # -- actions ------------------------------------------------------------
+    # -- derived ------------------------------------------------------------
+
+    @property
+    def tuned(self) -> int:
+        """The frequency actually being received: centre plus cursor offset."""
+        return self.frequency + self.offset
+
+    @property
+    def step(self) -> int:
+        steps = self.config.steps
+        return steps[self.state.step_index % len(steps)]
+
+    def _default_filter(self) -> tuple[int, int]:
+        return DEFAULT_FILTERS.get(self.mode, (-3000, 3000))
+
+    # -- outgoing -----------------------------------------------------------
 
     def _touch(self) -> None:
         self._last_command_at = time.monotonic()
-
-    def _apply_frequency(self) -> None:
-        log.info("VFO %10d Hz  (step %d Hz)", self.state.frequency, self.state.step)
-        self._touch()
-        if not self.dry_run:
-            self.radio.set_frequency(self.state.frequency)
-
-    def _apply_mode(self) -> None:
-        log.info("mode %s", self.state.mode)
-        self._touch()
-        if not self.dry_run:
-            self.radio.set_mode(self.state.mode)
-
-    def _apply_agc(self) -> None:
-        log.info("AGC threshold %d dBm", self.state.agc_threshold)
-        self._touch()
-        self._show("AGC %d" % self.state.agc_threshold)
-        if not self.dry_run:
-            self.radio.set_agc_threshold(self.state.agc_threshold)
 
     def _show(self, text: str) -> None:
         """Put a transient label on the main display."""
         self._overlay = text
         self._overlay_until = time.monotonic() + OVERLAY_SECONDS
 
-    def _apply_filter(self) -> None:
-        log.info("filter %d .. %d Hz", self.state.filter_low, self.state.filter_high)
-        self._show("FIL %d" % (self.state.filter_high - self.state.filter_low))
+    def _apply_frequency(self) -> None:
+        log.info("VFO %10d Hz  (step %d Hz)", self.tuned, self.step)
         self._touch()
         if not self.dry_run:
-            self.radio.set_filter(self.state.filter_low, self.state.filter_high)
+            self.radio.set_frequency(self.frequency)
 
-    def _apply_mute(self) -> None:
-        log.info("mute %s", "on" if self.state.muted else "off")
+    def _apply_mode(self) -> None:
+        log.info("mode %s", self.mode)
         self._touch()
         if not self.dry_run:
-            self.radio.set_mute(self.state.muted)
+            self.radio.set_mode(self.mode)
+
+    def _apply_filter(self) -> None:
+        log.info("filter %d .. %d Hz", self.filter_low, self.filter_high)
+        self._touch()
+        self._show("FIL %d" % (self.filter_high - self.filter_low))
+        if not self.dry_run:
+            self.radio.set_filter(self.filter_low, self.filter_high)
+
+    def _apply_knob(self, action: str) -> None:
+        target = KNOB_TARGETS[action]
+        value = self.knob_values[action]
+        log.info("%s %d", target.label, value)
+        self._touch()
+        self._show("%s %d" % (target.label, value))
+        if not self.dry_run:
+            self.radio.command(target.name, value)
+
+    # -- incoming -----------------------------------------------------------
 
     def adopt_from_radio(self) -> None:
         """Take the receiver's current settings as the starting state."""
         if self.dry_run:
             return
         snapshot = self.radio.snapshot()
-        self.state.frequency = snapshot["frequency"]
-        self.state.offset = snapshot["offset"]
-        self.state.mode = snapshot["mode"]
-        self.state.agc_threshold = snapshot["agc_threshold"]
+        self.frequency = snapshot["frequency"]
+        self.offset = snapshot["offset"]
+        self.mode = snapshot["mode"]
+
         low, high = snapshot["filter_low"], snapshot["filter_high"]
         if filter_is_usable(low, high):
-            self.state.filter_low, self.state.filter_high = low, high
+            self.filter_low, self.filter_high = low, high
         else:
-            log.warning("SDRMAX reports an unusable filter (%d..%d Hz); the "
-                        "%s default will be used if the filter knob is turned",
-                        low, high, self.state.mode)
-            self.state.filter_low, self.state.filter_high = self._default_filter()
-        log.info("adopted from SDRMAX: %d Hz (offset %+d), %s, filter %d..%d Hz, "
-                 "AGC %d dBm", self.state.tuned, self.state.offset, self.state.mode,
-                 self.state.filter_low, self.state.filter_high,
-                 self.state.agc_threshold)
+            log.warning("SDRMAX reports an unusable filter (%d..%d Hz); the %s "
+                        "default will be used if the filter knob is turned",
+                        low, high, self.mode)
+            self.filter_low, self.filter_high = self._default_filter()
 
-    def _default_filter(self) -> tuple[int, int]:
-        return DEFAULT_FILTERS.get(self.state.mode, (-3000, 3000))
+        for action in set(self.config.knob_actions.values()):
+            if action == "filter":
+                continue
+            target = KNOB_TARGETS[action]
+            if target.readable:
+                try:
+                    self.knob_values[action] = int(float(
+                        self.radio.query(target.name)))
+                    continue
+                except (OSError, SdrMaxError) as exc:
+                    log.debug("cannot read %s: %s", target.name, exc)
+            self.knob_values[action] = UNREADABLE_START
+
+        log.info("adopted from SDRMAX: %d Hz (offset %+d), %s, filter %d..%d Hz%s",
+                 self.tuned, self.offset, self.mode,
+                 self.filter_low, self.filter_high,
+                 "".join(", %s %d" % (KNOB_TARGETS[a].label, v)
+                         for a, v in sorted(self.knob_values.items())))
 
     def sync_from_radio(self) -> bool:
-        """Adopt changes made in SDRMAX itself.  Returns True if anything moved."""
+        """Adopt changes made in SDRMAX itself.  True if anything moved."""
         if self.dry_run:
             return False
-        changed = False
         try:
             status = self.radio.get_status()
-            frequency, offset = status["frequency"], status["offset"]
             mode = self.radio.get_mode()
-            agc = self.radio.get_agc_threshold()
         except (OSError, SdrMaxError) as exc:
             log.debug("read-back failed: %s", exc)
             return False
 
-        if frequency != self.state.frequency:
-            log.info("SDRMAX moved the VFO to %d Hz", frequency)
-            self.state.frequency = frequency
+        changed = False
+        if status["frequency"] != self.frequency:
+            log.info("SDRMAX moved the VFO to %d Hz", status["frequency"])
+            self.frequency = status["frequency"]
             changed = True
-        if offset != self.state.offset:
+        if status["offset"] != self.offset:
             log.info("SDRMAX moved the offset tune to %+d Hz (receiving %d Hz)",
-                     offset, frequency + offset)
-            self.state.offset = offset
+                     status["offset"], status["frequency"] + status["offset"])
+            self.offset = status["offset"]
             changed = True
-        if mode != self.state.mode:
+        if mode != self.mode:
             log.info("SDRMAX changed the mode to %s", mode)
-            self.state.mode = mode
+            self.mode = mode
             changed = True
-        if agc != self.state.agc_threshold:
-            log.info("SDRMAX changed the AGC threshold to %d dBm", agc)
-            self.state.agc_threshold = agc
-            changed = True
+
+        for action, value in list(self.knob_values.items()):
+            target = KNOB_TARGETS[action]
+            if not target.readable:
+                continue
+            try:
+                current = int(float(self.radio.query(target.name)))
+            except (OSError, SdrMaxError):
+                continue
+            if current != value:
+                log.info("SDRMAX changed %s to %d", target.label, current)
+                self.knob_values[action] = current
+                changed = True
         return changed
 
-    # -- panel --------------------------------------------------------------
-
-    def refresh_display(self) -> None:
-        """Redraw frequency, mode and tuning step on the controller."""
-        if self.display is None:
-            return
-        panel = self.display.clear()
-        if self._overlay is not None and time.monotonic() < self._overlay_until:
-            panel.set_main_text(self._overlay)
-        else:
-            self._overlay = None
-            panel.set_frequency(self.state.tuned)
-            panel.set_flag("shift", self.state.offset != 0)
-        panel.set_mode(self.state.mode)
-        panel.set_flag("vfo")
-        panel.set_flag("rx")
-        # Underline the digit the tuning step moves: 1 Hz marks the units digit,
-        # 10 and 50 the tens, and so on.
-        panel.set_underline(len(str(self.state.step)))
-        if self.state.muted:
-            panel.set_flag("vol")
-        if self._smeter_dbm is not None:
-            panel.set_smeter_scale()
-            panel.set_smeter(self._smeter_dbm)
-        try:
-            self.controller.write(panel.render())
-        except OSError as exc:
-            log.debug("display write failed: %s", exc)
-        self._last_display_at = time.monotonic()
-
     def read_smeter(self) -> bool:
-        """Read the signal level.  Returns True if the panel should be redrawn."""
+        """Read the signal level.  True if the panel should be redrawn."""
         if self.dry_run or self.display is None:
             return False
         try:
@@ -328,98 +284,135 @@ class Bridge:
         self._smeter_dbm = dbm
         return moved
 
-    # -- event handling -----------------------------------------------------
+    # -- panel --------------------------------------------------------------
+
+    def refresh_display(self) -> None:
+        if self.display is None:
+            return
+        panel = self.display.clear()
+        if self._overlay is not None and time.monotonic() < self._overlay_until:
+            panel.set_main_text(self._overlay)
+        else:
+            self._overlay = None
+            panel.set_frequency(self.tuned)
+            panel.set_flag("shift", self.offset != 0)
+            panel.set_underline(len(str(self.step)))
+        panel.set_mode(self.mode)
+        panel.set_flag("vfo")
+        panel.set_flag("rx")
+        if self.muted:
+            panel.set_flag("vol")
+        if self._smeter_dbm is not None:
+            panel.set_smeter_scale()
+            panel.set_smeter(self._smeter_dbm)
+        try:
+            self.controller.write(panel.render())
+        except OSError as exc:
+            log.debug("display write failed: %s", exc)
+        self._last_display_at = time.monotonic()
+
+    # -- controls -----------------------------------------------------------
 
     def _tune(self, detents: int) -> None:
-        freq = self.state.frequency + detents * self.state.step
-        self.state.frequency = max(FREQ_MIN, min(FREQ_MAX, freq))
+        centre = self.frequency + detents * self.step
+        self.frequency = max(FREQ_MIN, min(FREQ_MAX, centre))
         self._apply_frequency()
 
-    def _adjust_agc(self, detents: int) -> None:
-        value = self.state.agc_threshold + detents * AGC_STEP
-        self.state.agc_threshold = max(AGC_MIN, min(AGC_MAX, value))
-        self._apply_agc()
+    def _adjust_knob(self, action: str, detents: int) -> None:
+        if action == "filter":
+            self._adjust_filter(detents)
+            return
+        target = KNOB_TARGETS[action]
+        value = self.knob_values.get(action, UNREADABLE_START)
+        value = max(target.low, min(target.high, value + detents * target.step))
+        if value == self.knob_values.get(action):
+            return
+        self.knob_values[action] = value
+        self._apply_knob(action)
 
     def _adjust_filter(self, detents: int) -> None:
         widen = detents * FILTER_STEP
-        low, high = self.state.filter_low, self.state.filter_high
+        low, high = self.filter_low, self.filter_high
         if not filter_is_usable(low, high):
             low, high = self._default_filter()
         if low < 0:  # symmetric passband - open both edges together
             low -= widen
             high += widen
-            width = high - low
-        else:  # single sideband - move the outer edge only
+        else:        # single sideband - move the outer edge only
             high += widen
-            width = high - low
-        if not FILTER_MIN_WIDTH <= width <= FILTER_MAX_WIDTH:
+        if not FILTER_MIN_WIDTH <= high - low <= FILTER_MAX_WIDTH:
             return
-        self.state.filter_low, self.state.filter_high = low, high
+        self.filter_low, self.filter_high = low, high
         self._apply_filter()
 
     def _cycle_step(self) -> None:
-        self.state.step_index = (self.state.step_index + 1) % len(STEP_SIZES)
-        log.info("tuning step %d Hz", self.state.step)
-        self._show("STEP %d" % self.state.step)
+        self.state.step_index = (self.state.step_index + 1) % len(self.config.steps)
+        log.info("tuning step %d Hz", self.step)
+        self._show("STEP %d" % self.step)
+
+    def _toggle(self, action: str) -> None:
+        switch = TOGGLE_ACTIONS[action]
+        if switch is None:  # write-only, so the state is tracked here
+            self.muted = not self.muted
+            state = self.muted
+            switch = "mute"
+        else:
+            state = not self.toggles.get(action, False)
+            self.toggles[action] = state
+        log.info("%s %s", action, "on" if state else "off")
+        self._show("%s %s" % (action.upper()[:5], "ON" if state else "OFF"))
+        self._touch()
+        if not self.dry_run:
+            self.radio.command(switch, 1 if state else 0)
+
+    def _press(self, button: str) -> bool:
+        action = self.config.buttons.get(button, "none")
+        if action == "none":
+            return False
+        if action.startswith("mode:"):
+            self.mode = action.split(":", 1)[1].upper()
+            self._apply_mode()
+            return True
+        if action == "step":
+            self._cycle_step()
+            return True
+        if action == "filter_reset":
+            self.filter_low, self.filter_high = self._default_filter()
+            self._apply_filter()
+            return True
+        if action in TOGGLE_ACTIONS:
+            self._toggle(action)
+            return True
+        return False
 
     def handle(self, events) -> bool:
-        """Apply a batch of controller events.  Returns True if anything changed."""
-        tune_detents = 0
-        agc_detents = 0
-        filter_detents = 0
+        """Apply a batch of controller events.  True if anything changed."""
+        detents: dict[str, int] = {}
         changed = False
 
         for event in events:
             if isinstance(event, EncoderEvent):
-                detents = event.delta * self.state.encoder_signs.get(event.encoder, 1)
-                if event.encoder == "MAIN":
-                    tune_detents += detents
-                elif event.encoder == "E1":
-                    agc_detents += detents
-                elif event.encoder == "E2":
-                    filter_detents += detents
+                sign = self.config.encoder_signs.get(event.encoder, 1)
+                detents[event.encoder] = (detents.get(event.encoder, 0)
+                                          + event.delta * sign)
             elif isinstance(event, ButtonEvent) and event.pressed:
-                changed |= self._handle_button(event.button)
+                changed |= self._press(event.button)
 
         # Coalesce encoder motion: one command per poll, not one per detent.
-        if tune_detents:
-            self._tune(tune_detents)
+        if detents.get("MAIN"):
+            self._tune(detents["MAIN"])
             changed = True
-        if agc_detents:
-            self._adjust_agc(agc_detents)
-            changed = True
-        if filter_detents:
-            self._adjust_filter(filter_detents)
-            changed = True
-
+        for name in ("E1", "E2"):
+            if detents.get(name):
+                self._adjust_knob(self.config.knob_actions[name], detents[name])
+                changed = True
         return changed
-
-    def _handle_button(self, button: str) -> bool:
-        if button in BUTTON_MODES:
-            self.state.mode = BUTTON_MODES[button]
-            self._apply_mode()
-            return True
-        if button == "MAIN":
-            self._cycle_step()
-            return True
-        if button == "E1":
-            self.state.muted = not self.state.muted
-            self._apply_mute()
-            return True
-        if button == "E2":
-            self.state.filter_low, self.state.filter_high = self._default_filter()
-            self._apply_filter()
-            return True
-        return False
 
     # -- main loop ----------------------------------------------------------
 
     def run(self, poll_ms: int = 10, save_interval: float = 5.0,
-            duration: float = 0.0) -> None:
-        log.info(
-            "bridge running - main knob tunes, F1-F6 set mode, "
-            "push main knob cycles step, E1 AGC threshold, E2 filter"
-        )
+            duration: float = 0.0, should_stop=None) -> None:
+        log.info("bridge running\n%s", describe_bindings(self.config))
         self.adopt_from_radio()
         self.refresh_display()
         started = last_save = time.monotonic()
@@ -429,10 +422,15 @@ class Bridge:
                 if duration and time.monotonic() - started >= duration:
                     log.info("duration reached, stopping")
                     break
+                if should_stop is not None and should_stop():
+                    log.info("stop requested")
+                    break
+
                 events = self.controller.poll(timeout_ms=poll_ms)
                 if events:
                     dirty |= self.handle(events)
                 now = time.monotonic()
+
                 if now - self._last_smeter_at >= SMETER_INTERVAL:
                     self._last_smeter_at = now
                     if self.read_smeter():
@@ -453,12 +451,13 @@ class Bridge:
             self.state.save()
 
 
-def describe_bindings() -> str:
-    lines = ["Tmate 2 bindings:", "  main knob        tune VFO by the current step"]
-    lines.append("  push main knob   cycle step " +
-                 ", ".join(f"{s}" for s in STEP_SIZES) + " Hz")
-    for button, mode in BUTTON_MODES.items():
-        lines.append(f"  {button}               mode {mode}")
-    lines.append("  E1 knob          AGC threshold  |  push E1  mute on/off")
-    lines.append("  E2 knob          filter width  |  push E2  reset filter")
+def describe_bindings(config: Config) -> str:
+    lines = ["  main knob        tune, step %s Hz"
+             % "/".join(str(s) for s in config.steps)]
+    for name in ("E1", "E2"):
+        action = config.knob_actions[name]
+        label = "filter width" if action == "filter" else KNOB_TARGETS[action].label
+        lines.append("  %-16s %s" % (name + " knob", label))
+    for button in ("F1", "F2", "F3", "F4", "F5", "F6", "MAIN", "E1", "E2"):
+        lines.append("  %-16s %s" % ("press " + button, config.buttons[button]))
     return "\n".join(lines)

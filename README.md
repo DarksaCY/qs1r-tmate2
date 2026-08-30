@@ -26,39 +26,42 @@ The two protocols are documented in full:
   layout, encoder semantics, button bitmap, and the output report that drives
   every LCD segment
 
-## Requirements
+## Install
 
-* Windows, Python 3.10+
-* SDRMAX V running, with the QS1R connected
-* A Tmate 2 on the stock `HidUsb` driver (no vendor DLL required)
-
-```bash
-pip install -r requirements.txt
-```
-
-## Usage
+Windows, Python 3.10 or later, SDRMAX V running with the QS1R connected, and a
+Tmate 2 on the stock `HidUsb` driver (no vendor DLL needed).
 
 ```bash
-python -m qs1r_tmate
+py -m venv .venv && .venv/Scripts/pip install -e ".[tray]"
 ```
 
-Useful flags: `--dry-run` decodes the controller without touching the receiver,
-`--freq` tunes at startup, `--port` selects a different command channel, and
-`--invert MAIN,E1,E2` flips the direction of any knob and remembers it.
+Leave out `[tray]` for a console-only install.
 
-Turned clockwise the main knob reports negative deltas and the two small ones
-positive, so each is signed to make clockwise mean "more": frequency up, AGC
-louder, filter wider. Raising the AGC threshold makes the audio quieter, which
-was settled by an A/B test at -120 and 0 dBm rather than assumed.
+## Run
 
-On startup the bridge sends only frequency and mode. Volume and filter are left
-exactly as SDRMAX has them and are touched only when a knob asks for a change —
-there is no way to read them back, so overwriting them would silently discard
-your settings.
+```bash
+qs1r-tmate
+```
 
-### Default bindings
+`qs1r-tmate --tray` puts it in the system tray instead, where the menu shows
+whether it is connected and can open or re-apply the configuration.
+`qs1r-tmate --install-autostart` starts the tray version at login through the
+per-user `Run` key, and `--remove-autostart` undoes it.
 
-| Control | Action |
+Either way the bridge waits for SDRMAX and for the controller rather than
+exiting, so it can start before they do.
+
+Other flags: `--show-config` prints the settings and where they live,
+`--dry-run` decodes the controller without touching the receiver, `--no-display`
+leaves the LCD alone, `--invert MAIN,E1,E2` flips a knob direction, and
+`--backlight R,G,B` sets the panel colour. The last two edit the configuration
+and exit.
+
+## Configuration
+
+`%APPDATA%\qs1r-tmate\config.toml` is written with comments on first run.
+
+| Control | Default |
 |---|---|
 | Main knob | tune the VFO by the current step |
 | Push main knob | cycle step: 1, 10, 50, 100, 500, 1000, 5000, 10000 Hz |
@@ -66,15 +69,23 @@ your settings.
 | E1 knob / push | AGC threshold / mute |
 | E2 knob / push | filter width / reset filter |
 
+Buttons take `mode:USB` and friends, the toggles `mute`, `nb1`, `nb2`, `nr`,
+`anf`, `squelch`, `binaural`, `record`, or `step`, `filter_reset` and `none`.
+The small knobs take `agc`, `squelch`, `nb1`, `nb2`, `volume` or `filter`.
+
+Turned clockwise the main knob reports negative deltas and the two small ones
+positive, so each is signed to make clockwise mean "more": frequency up, AGC
+louder, filter wider. Raising the AGC threshold makes the audio quieter, which
+was settled by an A/B test at -120 and 0 dBm rather than assumed.
+
 The controller LCD shows the frequency grouped as `14.223.500`, lights the mode
 annunciator, underlines the digit the current tuning step moves, and drives the
 S-meter bar and its dBm readout live. Turning a small knob briefly replaces the
-frequency with what it is changing - `AGC -90`, `FIL 3000`, `STEP 100`. Turn it off with `--no-display`.
+frequency with what it is changing - `AGC -90`, `FIL 3000`, `STEP 100`.
 
-The backlight is set with `--backlight R,G,B` and remembered for later runs.
-Note that the values do not behave like sRGB, because the green LED is much
-weaker than the other two: `255,255,255` looks purple, white is near
-`32,255,32`, and amber is `255,160,0`.
+The backlight does not behave like sRGB, because the green LED is much weaker
+than the other two: `255,255,255` looks purple, white is near `32,255,32`, and
+amber is `255,160,0`.
 
 ## Bidirectional sync
 
