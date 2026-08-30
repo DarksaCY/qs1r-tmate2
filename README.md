@@ -47,8 +47,9 @@ Useful flags: `--dry-run` decodes the controller without touching the receiver,
 `--invert MAIN,E1,E2` flips the direction of any knob and remembers it.
 
 Turned clockwise the main knob reports negative deltas and the two small ones
-positive, so each is signed to make clockwise mean "more": frequency up, filter
-wider, and AGC louder - which is a *lower* threshold, hence the inversion on E1.
+positive, so each is signed to make clockwise mean "more": frequency up, AGC
+louder, filter wider. Raising the AGC threshold makes the audio quieter, which
+was settled by an A/B test at -120 and 0 dBm rather than assumed.
 
 On startup the bridge sends only frequency and mode. Volume and filter are left
 exactly as SDRMAX has them and are touched only when a knob asks for a change —

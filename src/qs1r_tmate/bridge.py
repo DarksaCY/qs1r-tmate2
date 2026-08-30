@@ -40,8 +40,12 @@ BUTTON_MODES = {
 
 #: Direction of each encoder, measured on the panel: turned clockwise the main
 #: knob reports negative deltas and the two small ones positive.  The signs here
-#: turn every knob into "clockwise increases": frequency up, filter wider, and -
-#: because a lower AGC threshold means more gain on weak signals - AGC louder.
+#: make clockwise mean "more" on all three: frequency up, AGC louder, filter
+#: wider.
+#:
+#: E1 is inverted because raising the AGC threshold makes the audio *quieter* -
+#: established by ear with an A/B test at -120 and 0 dBm, not by reasoning about
+#: what a threshold ought to do.
 ENCODER_SIGNS = {"MAIN": -1, "E1": -1, "E2": 1}
 
 #: Kept for the --reverse-tuning flag.
