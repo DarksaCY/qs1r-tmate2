@@ -23,7 +23,8 @@ The two protocols are documented in full:
 * [docs/sdrmax-v-protocol.md](docs/sdrmax-v-protocol.md) — ports, framing, ~60
   commands, the mode table, and the control surfaces beyond TCP
 * [docs/tmate2-hid.md](docs/tmate2-hid.md) — report descriptor, input report
-  layout, encoder semantics, button bitmap
+  layout, encoder semantics, button bitmap, and the output report that drives
+  every LCD segment
 
 ## Requirements
 
@@ -60,6 +61,10 @@ your settings.
 | E1 knob / push | volume / mute |
 | E2 knob / push | filter width / reset filter |
 
+The controller LCD shows the frequency grouped as `14.223.500`, lights the mode
+annunciator, and underlines the digit the current tuning step moves. Turn it off
+with `--no-display`, or recolour the backlight with `--backlight R,G,B`.
+
 ## Bidirectional sync
 
 The receiver is the single source of truth. Nearly every SDRMAX setter turns out
@@ -92,7 +97,8 @@ Three things SDRMAX does that any client has to survive — all documented in
 
 1. ~~**Vertical slice** — knob tunes, buttons switch mode.~~ done
 2. ~~**Bidirectional sync** — SDRMAX and the controller track each other.~~ done
-3. **Tmate 2 display** — decode the 64-byte output report and put frequency and
-   mode on the controller's LCD. The S-meter will need a source other than the
-   command protocol.
-4. Packaging: tray application, autostart, configurable bindings.
+3. ~~**Tmate 2 display** — frequency, mode and tuning step on the LCD.~~ done
+4. **S-meter on the panel.** The display has three digits and a fifteen-segment
+   bar for it, but SDRMAX exposes no signal level over the command protocol, so
+   this needs another source — most likely the spectrum data on UDP 43072/43076.
+5. Packaging: tray application, autostart, configurable bindings.

@@ -140,6 +140,20 @@ class Tmate2:
         main, e1, e2, buttons = struct.unpack_from("<4h", report, 1)
         return {"MAIN": main, "E1": e1, "E2": e2}, buttons & 0x1FF
 
+    def write(self, report: bytes) -> int:
+        """Send an output report.
+
+        Byte 0 is the HID report number, which is always zero here because the
+        device declares no report IDs.  hidapi zero-pads the report out to the
+        declared 64 bytes.
+
+        Note that every write replaces the whole device state, encoder speed and
+        acceleration included, so a report must always carry those too.
+        """
+        if self._dev is None:
+            raise RuntimeError("device is not open")
+        return self._dev.write(report)
+
     def poll(self, timeout_ms: int = 20) -> list[Event]:
         """Read pending reports and return the events they imply.
 

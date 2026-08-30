@@ -38,8 +38,8 @@ b1 02             Feature (Data, Var, Abs)    -> 1-byte feature report
 c0              End Collection
 ```
 
-**No Report ID is declared**, so the bytes below are raw payload — the leading
-`0x01` is data, not a HID report ID.
+**No Report ID is declared.** On input the bytes below are raw payload; on output
+hidapi still requires a leading report-number byte, which is always zero.
 
 ## Input report
 
@@ -60,7 +60,10 @@ reopening the device. Motion is the difference between successive reports, taken
 modulo 2^16 so that wrap-around is handled.
 
 Because the position carries over, the first report after opening the device
-must be used as a baseline only — replaying it as motion would fling the VFO.
+must be used as a baseline only - replaying it as motion would fling the VFO.
+
+The main encoder counts **up when turned anticlockwise**, opposite to the two
+small encoders.
 
 ### Button bitmap
 
@@ -82,12 +85,81 @@ All released reads `0x01FF`.
 
 While a button is held, byte 0 alternates between `0x01` and `0x00` at roughly
 50 Hz with the rest of the payload unchanged. It is probably a key-repeat or
-sequence flag. The bridge currently ignores byte 0.
+sequence flag. The bridge ignores byte 0.
 
 ## Output report
 
-64 bytes, not yet decoded. Per the surviving community notes it drives 170+
-individual LCD segments (one bit each), the green and red LEDs, the RGB
-backlight, contrast, and the encoder step / acceleration settings. Mapping this
-is the prerequisite for showing frequency and mode on the controller's own
-display.
+44 bytes are sent (hidapi zero-pads the rest of the 64). Byte 0 is the report
+number and is always zero, so the payload occupies bytes 1..43.
+
+The bit map below comes from the interface published by the
+[Tmate2_C](https://github.com/microenh/Tmate2_C) project, whose field names come
+in turn from the vendor `Tmate2LcdSegment.pdf`. It was re-derived into byte and
+bit offsets here and confirmed against the real panel.
+
+**Every write replaces the entire device state**, including the encoder speed
+and acceleration settings. A report that leaves bytes 39..43 at zero will
+reconfigure the encoders, so those must be included in every write.
+
+### Main display
+
+Nine seven-segment digits, position 1 rightmost. Each digit spans two bytes:
+
+```
+left  byte = 22 - 2 * position      low nibble, segments d e g f (bit 3 -> d)
+right byte = 23 - 2 * position      low 3 bits, segments c b a   (bit 2 -> c)
+                                    bit 3 of the right byte is that digit's underline
+```
+
+Note that the vendor names the left nibble `defg`, but the actual bit order is
+**d, e, g, f** - confirmed against the digits 0, 2, 3, 5, 6 and 9.
+
+Two decimal points: `dot2` (byte 16, bit 4) sits after digit 3 and `dot1`
+(byte 10, bit 4) after digit 6, which groups a frequency in Hz as `14.223.500`.
+
+### S-meter
+
+Three digits, position 1 rightmost, in a different segment order again -
+`f, g, e` and `a, b, c, d`:
+
+```
+right byte = 22 + 2 * position      bits 4..7, segments a b c d (bit 7 -> a)
+left  byte = 23 + 2 * position      bits 5..7, segments f g e   (bit 7 -> f)
+```
+
+Fifteen bar segments, left to right: 1..3 are byte 2 bits 1..3; 4..7 are byte 32
+bits 7..4; 8..11 are byte 31 bits 4..7; 12..15 are byte 30 bits 7..4.
+
+### Annunciators
+
+Mode indicators live in bytes 22 and 23: `cw_plus`, `cw_minus`, `dig_plus`,
+`dig_minus`, `dsb`, `fm`, `usb`, `sam` in byte 22 bits 0..7, and `drm`, `dig`,
+`stereo`, `dbm`, `cw`, `lsb`, `am` in byte 23. Units are `hz` (24.0), `k` (26.0),
+`mw_w` (28.0) and `mw_m` (29.0). The full table is in
+[`display.py`](../src/qs1r_tmate/display.py).
+
+### Panel
+
+| Byte | Meaning |
+|---|---|
+| 33 | bit 0 `usb_led`, bit 1 `lock_led`, bit 2 `click` |
+| 34, 35, 36 | backlight red, green, blue |
+| 37 | contrast |
+| 38 | refresh |
+| 39..41 | main encoder step size at three speeds |
+| 42, 43 | speed transition thresholds |
+
+`click` is a **toggle**, not a level: the device beeps whenever the bit changes
+value.
+
+### Verified on hardware
+
+* Each colour byte drives its own channel correctly on its own, but
+  **255,255,255 shows as purple** - the green LED is far weaker than red and
+  blue. White is approximately **32, 255, 32**.
+* Bytes 37 and 38 produced no visible change in a single-byte sweep.
+* The panel holds its contents while the HID handle is open and blanks when the
+  process closes the device, so a bridge simply keeps it open and refreshes.
+
+`tools/probe_bytes.py` drives one byte at a time while showing that byte's index
+on the display, which is how the colour channels above were pinned down.

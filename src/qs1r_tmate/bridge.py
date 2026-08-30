@@ -19,6 +19,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .display import Display
 from .sdrmax import SdrMax, SdrMaxError
 from .tmate2 import ButtonEvent, EncoderEvent, Tmate2
 
@@ -40,6 +41,15 @@ BUTTON_MODES = {
 #: The main encoder counts up when turned anticlockwise, so tuning is inverted
 #: relative to the counter. Flip this to +1 if you prefer the raw direction.
 TUNE_SIGN = -1
+
+#: Backlight colour.  The green LED is far weaker than red and blue: 255,255,255
+#: reads as purple on the panel, and white needs roughly this ratio.  Calibrated
+#: by eye against the real device.
+BACKLIGHT = (32, 255, 32)
+
+#: Rewrite the panel at least this often, in seconds.  The LCD holds its content
+#: while the HID handle is open, but a steady refresh keeps it certain.
+DISPLAY_REFRESH = 1.0
 
 #: How often to look for changes made in SDRMAX itself, in seconds.
 SYNC_INTERVAL = 0.25
@@ -122,7 +132,8 @@ class State:
 
 class Bridge:
     def __init__(self, radio: SdrMax, controller: Tmate2, state: State | None = None,
-                 dry_run: bool = False, tune_sign: int = TUNE_SIGN) -> None:
+                 dry_run: bool = False, tune_sign: int = TUNE_SIGN,
+                 display: Display | None = None) -> None:
         self.radio = radio
         self.controller = controller
         self.state = state or State.load()
@@ -130,6 +141,14 @@ class Bridge:
         self.tune_sign = tune_sign
         self._last_command_at = 0.0
         self._last_sync_at = 0.0
+        self._last_display_at = 0.0
+        self.display = display
+        if self.display is not None:
+            self.display.set_rgb(*BACKLIGHT)
+            # Every report replaces the whole device state, so the encoder
+            # profile has to ride along on all of them.  All three speeds are 1:
+            # no hardware acceleration, one count per detent.
+            self.display.set_encoder_profile(1, 1, 1, 32, 64)
 
     # -- actions ------------------------------------------------------------
 
@@ -209,6 +228,28 @@ class Bridge:
             self.state.mode = mode
             changed = True
         return changed
+
+    # -- panel --------------------------------------------------------------
+
+    def refresh_display(self) -> None:
+        """Redraw frequency, mode and tuning step on the controller."""
+        if self.display is None:
+            return
+        panel = self.display.clear()
+        panel.set_frequency(self.state.frequency)
+        panel.set_mode(self.state.mode)
+        panel.set_flag("vfo")
+        panel.set_flag("rx")
+        # Underline the digit the tuning step moves: 1 Hz marks the units digit,
+        # 10 and 50 the tens, and so on.
+        panel.set_underline(len(str(self.state.step)))
+        if self.state.muted:
+            panel.set_flag("vol")
+        try:
+            self.controller.write(panel.render())
+        except OSError as exc:
+            log.debug("display write failed: %s", exc)
+        self._last_display_at = time.monotonic()
 
     # -- event handling -----------------------------------------------------
 
@@ -301,6 +342,7 @@ class Bridge:
             "push main knob cycles step, E1 volume, E2 filter"
         )
         self.adopt_from_radio()
+        self.refresh_display()
         started = last_save = time.monotonic()
         dirty = False
         try:
@@ -316,6 +358,8 @@ class Bridge:
                         and now - self._last_command_at >= SYNC_QUIET_PERIOD):
                     self._last_sync_at = now
                     dirty |= self.sync_from_radio()
+                if dirty or now - self._last_display_at >= DISPLAY_REFRESH:
+                    self.refresh_display()
                 if dirty and now - last_save >= save_interval:
                     self.state.save()
                     last_save = now

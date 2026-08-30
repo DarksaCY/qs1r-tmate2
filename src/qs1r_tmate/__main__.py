@@ -7,6 +7,7 @@ import logging
 import sys
 
 from .bridge import TUNE_SIGN, Bridge, State, describe_bindings
+from .display import Display
 from .sdrmax import PORT_RX2_CMD, SdrMax, SdrMaxError
 from .tmate2 import Tmate2, Tmate2NotFound
 
@@ -24,6 +25,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="command port (default: %(default)s, the free RX2 channel)")
     parser.add_argument("--freq", type=int, default=None,
                         help="tune the receiver to this frequency in Hz at startup")
+    parser.add_argument("--no-display", action="store_true",
+                        help="leave the controller LCD alone")
+    parser.add_argument("--backlight", metavar="R,G,B",
+                        help="backlight colour, e.g. 96,255,96")
     parser.add_argument("--reverse-tuning", action="store_true",
                         help="flip the main knob's tuning direction")
     parser.add_argument("--duration", type=float, default=0.0,
@@ -68,11 +73,17 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        Bridge(
+        display = None if args.no_display else Display()
+        bridge = Bridge(
             radio, controller, state,
             dry_run=args.dry_run,
             tune_sign=-TUNE_SIGN if args.reverse_tuning else TUNE_SIGN,
-        ).run(duration=args.duration)
+            display=display,
+        )
+        # after Bridge(), which applies the default backlight
+        if display is not None and args.backlight:
+            display.set_rgb(*(int(v) for v in args.backlight.split(",")))
+        bridge.run(duration=args.duration)
     finally:
         controller.close()
         radio.close()
