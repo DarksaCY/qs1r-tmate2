@@ -26,7 +26,15 @@ The two protocols are documented in full:
   layout, encoder semantics, button bitmap, and the output report that drives
   every LCD segment
 
-## Install
+## Download
+
+Ready-to-run Windows builds are on the
+[releases page](https://github.com/DarksaCY/qs1r-tmate2/releases): take
+`qs1r-tmate-tray.exe` for the tray application, or `qs1r-tmate.exe` for the
+console. Nothing to install. They are unsigned, so SmartScreen warns on first
+run - *More info*, then *Run anyway*, or build from source below.
+
+## Install from source
 
 Windows, Python 3.10 or later, SDRMAX V running with the QS1R connected, and a
 Tmate 2 on the stock `HidUsb` driver (no vendor DLL needed).
@@ -56,6 +64,14 @@ Other flags: `--show-config` prints the settings and where they live,
 leaves the LCD alone, `--invert MAIN,E1,E2` flips a knob direction, and
 `--backlight R,G,B` sets the panel colour. The last two edit the configuration
 and exit.
+
+## Building the executables
+
+```bash
+.venv/Scripts/pip install pyinstaller
+.venv/Scripts/python -m PyInstaller --onefile --console --name qs1r-tmate     --paths src --collect-submodules qs1r_tmate --collect-binaries hid     packaging/console_entry.py
+.venv/Scripts/python -m PyInstaller --onefile --windowed --name qs1r-tmate-tray     --paths src --collect-submodules qs1r_tmate --collect-binaries hid     --collect-all pystray --collect-all PIL packaging/tray_entry.py
+```
 
 ## Configuration
 
