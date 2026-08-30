@@ -104,6 +104,10 @@ Three things SDRMAX does that any client has to survive — all documented in
   `-314169 .. -307519` — with the correct width. SDRMAX's own display shows the
   same, so it is not a protocol error. The bridge validates them and falls back
   to a per-mode default.
+* **The frequency is two numbers.** `?fhz` is only the centre; clicking the
+  spectrum moves a separate offset tune that appears nowhere else but the third
+  field of `?status`. The bridge shows `fhz + offset`, which is what you hear,
+  and lights `SHIFT` when the cursor is off centre.
 * **The S-meter is well hidden.** No query named after `smeter`, `level` or
   `dbm` works; the one that does is `?SmeterValue`, which appears in the binary
   only as a settings key.

@@ -226,6 +226,26 @@ class SdrMax:
         """
         return float(self.query("SmeterValue"))
 
+    def get_status(self) -> dict:
+        """Mode, centre frequency and offset tune in one round trip.
+
+        ``?status`` answers ``AM,9685030,-44800;``.  The third field is the
+        offset of the spectrum cursor from the centre frequency, in Hz, and it
+        is the only place the protocol exposes it: clicking the SDRMAX spectrum
+        moves the cursor and changes nothing else that can be queried, so the
+        frequency actually being received is ``frequency + offset``.
+        """
+        raw = self.query("status").rstrip(";")
+        mode, frequency, offset = raw.split(",")
+        return {
+            "mode": mode.strip(),
+            "frequency": int(frequency),
+            "offset": int(offset),
+        }
+
+    def get_offset(self) -> int:
+        return self.get_status()["offset"]
+
     def get_samplerate(self) -> int:
         return int(self.query("samplerate"))
 
@@ -235,8 +255,10 @@ class SdrMax:
     def snapshot(self) -> dict:
         """Read the settings the bridge cares about in one round trip each."""
         low, high = self.get_filter()
+        status = self.get_status()
         return {
-            "frequency": self.get_frequency(),
+            "frequency": status["frequency"],
+            "offset": status["offset"],
             "mode": self.get_mode(),
             "filter_low": low,
             "filter_high": high,

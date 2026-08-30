@@ -121,6 +121,7 @@ class State:
 
     frequency: int = 14_223_500
     mode: str = "USB"
+    offset: int = 0
     agc_threshold: int = -90
     muted: bool = False
     encoder_signs: dict = field(default_factory=lambda: dict(ENCODER_SIGNS))
@@ -129,6 +130,11 @@ class State:
     filter_high: int = 5072
     backlight: list = field(default_factory=lambda: list(BACKLIGHT))
     _path: Path = field(default_factory=_state_path, repr=False, compare=False)
+
+    @property
+    def tuned(self) -> int:
+        """The frequency actually being received: centre plus cursor offset."""
+        return self.frequency + self.offset
 
     @property
     def step(self) -> int:
@@ -226,6 +232,7 @@ class Bridge:
             return
         snapshot = self.radio.snapshot()
         self.state.frequency = snapshot["frequency"]
+        self.state.offset = snapshot["offset"]
         self.state.mode = snapshot["mode"]
         self.state.agc_threshold = snapshot["agc_threshold"]
         low, high = snapshot["filter_low"], snapshot["filter_high"]
@@ -236,8 +243,8 @@ class Bridge:
                         "%s default will be used if the filter knob is turned",
                         low, high, self.state.mode)
             self.state.filter_low, self.state.filter_high = self._default_filter()
-        log.info("adopted from SDRMAX: %d Hz, %s, filter %d..%d Hz, AGC %d dBm",
-                 self.state.frequency, self.state.mode,
+        log.info("adopted from SDRMAX: %d Hz (offset %+d), %s, filter %d..%d Hz, "
+                 "AGC %d dBm", self.state.tuned, self.state.offset, self.state.mode,
                  self.state.filter_low, self.state.filter_high,
                  self.state.agc_threshold)
 
@@ -250,7 +257,8 @@ class Bridge:
             return False
         changed = False
         try:
-            frequency = self.radio.get_frequency()
+            status = self.radio.get_status()
+            frequency, offset = status["frequency"], status["offset"]
             mode = self.radio.get_mode()
             agc = self.radio.get_agc_threshold()
         except (OSError, SdrMaxError) as exc:
@@ -260,6 +268,11 @@ class Bridge:
         if frequency != self.state.frequency:
             log.info("SDRMAX moved the VFO to %d Hz", frequency)
             self.state.frequency = frequency
+            changed = True
+        if offset != self.state.offset:
+            log.info("SDRMAX moved the offset tune to %+d Hz (receiving %d Hz)",
+                     offset, frequency + offset)
+            self.state.offset = offset
             changed = True
         if mode != self.state.mode:
             log.info("SDRMAX changed the mode to %s", mode)
@@ -282,7 +295,8 @@ class Bridge:
             panel.set_main_text(self._overlay)
         else:
             self._overlay = None
-            panel.set_frequency(self.state.frequency)
+            panel.set_frequency(self.state.tuned)
+            panel.set_flag("shift", self.state.offset != 0)
         panel.set_mode(self.state.mode)
         panel.set_flag("vfo")
         panel.set_flag("rx")

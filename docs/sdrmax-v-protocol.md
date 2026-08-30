@@ -85,7 +85,7 @@ found them.
 | `?serverpid`, `?tonefrequency` | `serverpid=12588` |
 | `?version` | `version=5.0.1.1` |
 | `?SmeterValue` | `SmeterValue=-59.7556` — signal level in dBm, live |
-| `?status` | `status=AM,9600000,100;` — mode name, frequency, and a third field |
+| `?status` | `status=AM,9685030,-44800;` — mode name, centre frequency, and the offset tune in Hz |
 
 Query names are **case insensitive**: `?SmeterValue`, `?smetervalue` and
 `?SMeterValue` all answer.
@@ -97,6 +97,22 @@ Names that answer `?` (not supported): `frequency`, `vfo`, `center`, `filtertaps
 The signal level took some finding: no name resembling `smeter`, `level` or
 `dbm` works, and the one that does — `SmeterValue` — appears in the binary only
 as a settings key next to `SmeterCorrection`. It updates continuously.
+
+### Two frequencies, not one
+
+SDRMAX tunes in two stages: a **centre frequency**, which is the big VFO readout
+and what `?fhz` returns, and an **offset tune** — the cursor on the spectrum,
+moved by clicking or with the mouse wheel. What you actually hear is
+
+```
+received = fhz + offset
+```
+
+Clicking the spectrum changes **nothing else that can be queried** — a diff of
+all 48 query values across a click showed no difference anywhere. The only place
+the offset appears is the third field of `?status`, so any client that reports
+"the frequency" has to read `?status` rather than `?fhz`, or it will silently
+show the wrong one whenever the cursor is off centre.
 
 ### Caveats found on hardware
 
