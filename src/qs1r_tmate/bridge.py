@@ -54,6 +54,13 @@ FILTER_STEP = 50
 #: Anything beyond this is treated as unusable rather than adopted.
 FILTER_SANE_LIMIT = 20_000
 
+#: Which edge the filter knob moves.  A single sideband has to keep the edge
+#: nearest the carrier where it is - opening a USB filter downwards turns it
+#: into DSB and defeats the point of the mode - so only the outer edge moves.
+#: +1 keeps the low edge and moves the high one, -1 the other way round, and a
+#: mode that is not listed opens symmetrically.
+SIDEBAND = {"USB": 1, "DIG": 1, "LSB": -1}
+
 #: Passband to fall back on per mode when the filter in SDRMAX is unusable.
 DEFAULT_FILTERS = {
     "AM": (-3325, 3325), "SAM": (-3325, 3325), "DSB": (-3000, 3000),
@@ -333,17 +340,34 @@ class Bridge:
     def _adjust_filter(self, detents: int) -> None:
         widen = detents * FILTER_STEP
         low, high = self.filter_low, self.filter_high
-        if not filter_is_usable(low, high):
+        side = SIDEBAND.get(self.mode)
+
+        if not filter_is_usable(low, high) or not self._filter_suits_mode(low, high):
+            # SDRMAX hands out symmetric passbands even in USB and LSB, and the
+            # previous mode's passband survives a mode change.  Widening one of
+            # those opens the wrong edge, or skews a symmetric mode off centre,
+            # so start from the passband this mode should have.
             low, high = self._default_filter()
-        if low < 0:  # symmetric passband - open both edges together
+
+        if side is None:
             low -= widen
             high += widen
-        else:        # single sideband - move the outer edge only
+        elif side > 0:      # USB: the low edge stays at the carrier
             high += widen
+        else:               # LSB: the high edge stays at the carrier
+            low -= widen
+
         if not FILTER_MIN_WIDTH <= high - low <= FILTER_MAX_WIDTH:
             return
         self.filter_low, self.filter_high = low, high
         self._apply_filter()
+
+    def _filter_suits_mode(self, low: int, high: int) -> bool:
+        """Is this passband shaped the way the current mode wants it?"""
+        side = SIDEBAND.get(self.mode)
+        if side is None:
+            return low < 0 < high   # symmetric modes straddle the carrier
+        return low >= 0 if side > 0 else high <= 0
 
     def _cycle_step(self) -> None:
         self.state.step_index = (self.state.step_index + 1) % len(self.config.steps)

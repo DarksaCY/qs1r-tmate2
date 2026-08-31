@@ -99,6 +99,13 @@ positive, so each is signed to make clockwise mean "more": frequency up, AGC
 louder, filter wider. Raising the AGC threshold makes the audio quieter, which
 was settled by an A/B test at -120 and 0 dBm rather than assumed.
 
+The filter knob respects the mode: in USB the lower edge stays at the carrier
+and only the upper one moves, in LSB the other way round, and the symmetric
+modes open both edges together. If SDRMAX hands out a passband that does not
+suit the mode - it gives symmetric filters even in USB, and the previous mode's
+filter survives a mode change - the knob snaps to that mode's default first
+rather than widening the wrong edge.
+
 The controller LCD shows the frequency grouped as `14.223.500`, lights the mode
 annunciator, underlines the digit the current tuning step moves, and drives the
 S-meter bar and its dBm readout live. Turning a small knob briefly replaces the
