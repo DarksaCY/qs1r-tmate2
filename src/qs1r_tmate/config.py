@@ -77,8 +77,8 @@ DEFAULTS = {
         "e1_action": "agc", "e2_action": "filter",
     },
     "buttons": {
-        "f1": "mode:AM", "f2": "mode:SAM", "f3": "mode:LSB",
-        "f4": "mode:DSB", "f5": "mode:USB", "f6": "mode:CW",
+        "f1": "mode:LSB", "f2": "mode:SAM", "f3": "mode:CW",
+        "f4": "mode:DSB", "f5": "mode:USB", "f6": "mode:AM",
         "main": "step", "e1": "mute", "e2": "filter_reset",
     },
     "display": {"enabled": True, "backlight": [255, 160, 0]},
@@ -148,9 +148,12 @@ class Config:
         default_factory=lambda: {"MAIN": -1, "E1": -1, "E2": 1})
     knob_actions: dict = field(
         default_factory=lambda: {"E1": "agc", "E2": "filter"})
+    #: The panel keys do not reach the software in their printed order: panel
+    #: F1..F6 arrive as F6, F2, F1, F4, F5, F3.  These defaults are arranged so
+    #: that the panel reads AM, SAM, LSB, DSB, USB, CW from left to right.
     buttons: dict = field(default_factory=lambda: {
-        "F1": "mode:AM", "F2": "mode:SAM", "F3": "mode:LSB",
-        "F4": "mode:DSB", "F5": "mode:USB", "F6": "mode:CW",
+        "F1": "mode:LSB", "F2": "mode:SAM", "F3": "mode:CW",
+        "F4": "mode:DSB", "F5": "mode:USB", "F6": "mode:AM",
         "MAIN": "step", "E1": "mute", "E2": "filter_reset",
     })
     display_enabled: bool = True

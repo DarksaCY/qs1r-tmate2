@@ -69,8 +69,12 @@ and exit.
 
 ```bash
 .venv/Scripts/pip install pyinstaller
-.venv/Scripts/python -m PyInstaller --onefile --console --name qs1r-tmate     --paths src --collect-submodules qs1r_tmate --collect-binaries hid     packaging/console_entry.py
-.venv/Scripts/python -m PyInstaller --onefile --windowed --name qs1r-tmate-tray     --paths src --collect-submodules qs1r_tmate --collect-binaries hid     --collect-all pystray --collect-all PIL packaging/tray_entry.py
+.venv/Scripts/python -m PyInstaller --onefile --console --name qs1r-tmate ^
+    --paths src --collect-submodules qs1r_tmate --collect-binaries hid ^
+    packaging/console_entry.py
+.venv/Scripts/python -m PyInstaller --onefile --windowed --name qs1r-tmate-tray ^
+    --paths src --collect-submodules qs1r_tmate --collect-binaries hid ^
+    --collect-all pystray --collect-all PIL packaging/tray_entry.py
 ```
 
 ## Configuration
@@ -84,6 +88,10 @@ and exit.
 | F1 … F6 | AM, SAM, LSB, DSB, USB, CW |
 | E1 knob / push | AGC threshold / mute |
 | E2 knob / push | filter width / reset filter |
+
+The panel keys do not reach the software in their printed order - panel F1..F6
+arrive as F6, F2, F1, F4, F5, F3 - so the defaults in `[buttons]` are arranged to
+read left to right on the panel rather than in name order.
 
 Buttons take `mode:USB` and friends, the toggles `mute`, `nb1`, `nb2`, `nr`,
 `anf`, `squelch`, `binaural`, `record`, or `step`, `filter_reset` and `none`.
@@ -145,4 +153,4 @@ Three things SDRMAX does that any client has to survive — all documented in
 2. ~~**Bidirectional sync** — SDRMAX and the controller track each other.~~ done
 3. ~~**Tmate 2 display** — frequency, mode and tuning step on the LCD.~~ done
 4. ~~**S-meter on the panel** — live level on the bar and in dBm.~~ done
-5. Packaging: tray application, autostart, configurable bindings.
+5. ~~Packaging: tray application, autostart, configurable bindings.~~ done
