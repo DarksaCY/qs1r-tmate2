@@ -123,10 +123,15 @@ def dbm_to_bars(dbm: float) -> int:
     return max(0, min(BAR_COUNT, int(bars)))
 
 #: SDRMAX mode -> annunciator on the LCD.
+#: Byte 22 and 23 bits were swept one at a time and read off the panel, so these
+#: are observed.  FMW additionally lights ``w_fm``, which was not part of that
+#: sweep and is the one guess left here.
 MODE_FLAGS = {
     "AM": "am", "SAM": "sam", "LSB": "lsb", "USB": "usb",
-    "DSB": "dsb", "CW": "cw", "FMN": "fm", "DIG": "dig",
+    "DSB": "dsb", "CW": "cw", "FMN": "fm", "FMW": "fm", "DIG": "dig",
 }
+#: Extra flags lit alongside the main annunciator.
+MODE_EXTRA_FLAGS = {"FMW": ("w_fm",)}
 
 _BYTE_RGB_RED, _BYTE_RGB_GREEN, _BYTE_RGB_BLUE = 34, 35, 36
 _BYTE_CONTRAST = 37
@@ -243,9 +248,13 @@ class Display:
     def set_mode(self, mode: str) -> "Display":
         for flag in MODE_FLAGS.values():
             self.set_flag(flag, False)
+        for extra in MODE_EXTRA_FLAGS.get(mode.upper(), ()):
+            self.set_flag(extra, False)
         flag = MODE_FLAGS.get(mode.upper())
         if flag:
             self.set_flag(flag, True)
+        for extra in MODE_EXTRA_FLAGS.get(mode.upper(), ()):
+            self.set_flag(extra, True)
         return self
 
     # -- panel --------------------------------------------------------------

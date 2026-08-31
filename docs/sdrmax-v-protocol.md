@@ -184,21 +184,33 @@ TX (QS1E companion)
 
 ## Mode table
 
-`>mode` takes an index. It is **not** the left-to-right order of the mode
-buttons in the GUI — USB and DSB are swapped relative to the button row. Values
-0, 3 and 4 were confirmed on hardware; the rest follow the order of the mode
-strings inside the binary.
+`>mode` takes an index. Do not infer it from anything: it matches neither the
+left-to-right order of the GUI mode buttons nor the order the mode strings
+appear in the binary, and both of those guesses are wrong in different places.
 
-| Value | Mode | Default filter BW |
-|---|---|---|
-| 0 | AM  | 4000 Hz |
-| 1 | SAM | 4000 Hz |
-| 2 | LSB | 3000 Hz |
-| 3 | USB | 3000 Hz |
-| 4 | DSB | 3000 Hz |
-| 5 | CW  | 500 Hz |
-| 6 | FMN | |
-| 7 | DIG | |
+Read it out of SDRMAX instead — set each index and ask `?status`, whose first
+field is the mode by name. That is where this table comes from, and every entry
+round-trips by name:
+
+| Value | Mode |
+|---|---|
+| 0 | AM |
+| 1 | SAM |
+| 2 | FMN |
+| 3 | FMW |
+| 4 | DSB |
+| 5 | LSB |
+| 6 | USB |
+| 7 | CW |
+| 8 | DIG |
+
+9 and above answer `???`.
+
+**FMW has no button in the GUI**, so selecting it looks as though the command
+did nothing — which is exactly how a wrong index presents itself.
+
+Note that `?mode` returns the index, so reading it back and mapping it through
+the same table proves nothing. `?status` is the only check that is not circular.
 
 ## Server-to-client messages
 

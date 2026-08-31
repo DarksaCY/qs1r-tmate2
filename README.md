@@ -89,13 +89,10 @@ and exit.
 | E1 knob / push | AGC threshold / mute |
 | E2 knob / push | filter width / reset filter |
 
-The panel keys do not reach the software in their printed order - panel F1..F6
-arrive as F6, F2, F1, F4, F5, F3 - so the defaults in `[buttons]` are arranged to
-read left to right on the panel rather than in name order.
-
 Buttons take `mode:USB` and friends, the toggles `mute`, `nb1`, `nb2`, `nr`,
 `anf`, `squelch`, `binaural`, `record`, or `step`, `filter_reset` and `none`.
 The small knobs take `agc`, `squelch`, `nb1`, `nb2`, `volume` or `filter`.
+Modes are AM, SAM, FMN, FMW, DSB, LSB, USB, CW and DIG.
 
 Turned clockwise the main knob reports negative deltas and the two small ones
 positive, so each is signed to make clockwise mean "more": frequency up, AGC

@@ -30,18 +30,23 @@ PORT_RX2_CMD = 43067
 PORT_RX1_GUI = 43069
 PORT_RX2_GUI = 43071
 
-#: Mode argument for ``>mode``.  Verified against the GUI on hardware; note that
-#: this is *not* the left-to-right order of the mode buttons (USB and DSB are
-#: swapped there).
+#: Mode argument for ``>mode``, read out of SDRMAX itself: setting each index in
+#: turn and asking ``?status``, which answers with the mode by name.  It is not
+#: the order of the mode buttons in the GUI, and it is not the order the mode
+#: strings appear in the binary - guessing from either gets it wrong.
+#:
+#: FMW has no button in the GUI at all, so selecting it looks like nothing
+#: happened.  9 and above answer ``???``.
 MODES = {
     "AM": 0,
     "SAM": 1,
-    "LSB": 2,
-    "USB": 3,
+    "FMN": 2,
+    "FMW": 3,
     "DSB": 4,
-    "CW": 5,
-    "FMN": 6,
-    "DIG": 7,
+    "LSB": 5,
+    "USB": 6,
+    "CW": 7,
+    "DIG": 8,
 }
 MODE_NAMES = {v: k for k, v in MODES.items()}
 
